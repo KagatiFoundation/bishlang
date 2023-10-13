@@ -16,17 +16,10 @@
 //
 
 const std = @import("std");
+var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+var allocator = arena.allocator();
 
-const TokenType = enum {
-    TOKEN_DEKHAU,
-    TOKEN_GHUMAU,
-    TOKEN_BARABAR,
-    TOKEN_MA,
-    TOKEN_THULO,
-    TOKEN_SANO,
-    TOKEN_CHHAINA,
-    TOKEN_RAKHA,
-};
+pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_EOF };
 
 const KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
 fn init_keywords() !void {
@@ -40,15 +33,80 @@ fn init_keywords() !void {
     KEYWORDS.put("barabar", TokenType.TOKEN_BARABAR);
 }
 
-const Token = struct { token_type: TokenType, lexeme: []u8, literal: []u8, line: i32, column: i32 };
+pub const Token = struct { token_type: TokenType, lexeme: []const u8, literal: []const u8, line: usize, column: usize };
 
-fn token_new(token_type: TokenType, lexeme: []u8, literal: []u8, line: i32, column: i32) Token {
+pub fn token_new(token_type: TokenType, lexeme: []const u8, literal: []const u8, line: usize, column: usize) Token {
     return Token{ .token_type = token_type, .lexeme = lexeme, .literal = literal, .line = line, .column = column };
 }
 
 // scanner to scan through the source code
-const Scanner = struct { source: []u8, tokens: std.ArrayList(Token), current: i32, start: i32, line: i32 };
+pub const Scanner = struct { source: []const u8, tokens: std.ArrayList(Token), current: usize, start: usize, line: usize, column: usize };
 
-fn scanner_new(source: []u8) Scanner {
-    return Scanner{ .source = source, .tokens = std.ArrayList(Token).init(std.heap.page_allocator), .current = 0, .start = 0, .line = 0 };
+pub fn scanner_new(source: []const u8) Scanner {
+    return Scanner{ .source = source, .tokens = std.ArrayList(Token).init(allocator), .current = 0, .start = 0, .line = 1, .column = 1 };
+}
+
+pub fn scanner_scan_tokens(scanner: *Scanner) !std.ArrayList(Token) {
+    while (!scanner_is_at_end(scanner)) {
+        scanner.start = scanner.current;
+        const token = scanner_scan_token(scanner);
+        if (token.token_type != TokenType.TOKEN_NONE) {
+            _ = try scanner.tokens.append(token);
+        }
+    }
+    var endOfSource = Token{ .token_type = TokenType.TOKEN_EOF, .lexeme = "", .literal = "", .line = scanner.line, .column = scanner.column };
+    _ = try scanner.tokens.append(endOfSource);
+    return scanner.tokens;
+}
+
+fn scanner_scan_token(scanner: *Scanner) Token {
+    const char = scanner_advance(scanner);
+    if (char == '"') {
+        while (true) {
+            var peek_value: u8 = scanner_peek(scanner);
+            var end: bool = scanner_is_at_end(scanner);
+            if (peek_value == '"' or end) {
+                break;
+            } else {
+                _ = scanner_advance(scanner);
+            }
+        }
+        if (scanner_is_at_end(scanner)) {
+            std.debug.print("SyntaxError: Unterminated string literal (detected at line {d})\n", .{scanner.line});
+            return token_new(TokenType.TOKEN_ERROR, "", "", scanner.line, scanner.line);
+        }
+        _ = scanner_advance(scanner);
+        const lexeme = scanner.source[scanner.start + 1 .. scanner.current - 1];
+        return token_new(TokenType.TOKEN_STRING, lexeme, lexeme, scanner.line, scanner.column);
+    } else {
+        if (char == 10 or char == ' ') {
+            return token_new(TokenType.TOKEN_NONE, "", "", scanner.line, scanner.column);
+        }
+        return token_new(TokenType.TOKEN_ERROR, "", "", scanner.line, scanner.column);
+    }
+}
+
+fn scanner_peek(scanner: *Scanner) u8 {
+    if (scanner_is_at_end(scanner)) {
+        return 0;
+    }
+    return scanner.source[scanner.current];
+}
+
+fn scanner_advance(scanner: *Scanner) u8 {
+    var now = scanner.current;
+    scanner.current += 1;
+    return scanner.source[now];
+}
+
+fn scanner_is_at_end(scanner: *Scanner) bool {
+    return scanner.current >= scanner.source.len;
+}
+
+pub fn token_dump(token: *const Token) void {
+    std.debug.print("Token[ {}, {s}, {s} ]\n", .{ token.token_type, token.lexeme, token.literal });
+}
+
+pub fn scanner_destroy() void {
+    arena.deinit();
 }
