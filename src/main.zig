@@ -16,7 +16,15 @@
 //
 
 const std = @import("std");
+const scanner = @import("./scanner.zig");
 
 pub fn main() !void {
-    std.debug.print("All you {s}", .{"code is here"});
+    scanner.init();
+    var ss = scanner.Scanner("\"hello\""){};
+    defer ss.destroy();
+
+    var tokens = try ss.scanTokens();
+    for (tokens.items) |token| {
+        scanner.token_dump(&token);
+    }
 }

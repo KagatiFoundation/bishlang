@@ -17,96 +17,112 @@
 
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-var allocator = arena.allocator();
 
 pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_EOF };
 
-const KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
-fn init_keywords() !void {
-    KEYWORDS.put("dekhau", TokenType.TOKEN_DEKHAU);
-    KEYWORDS.put("ghumau", TokenType.TOKEN_GHUMAU);
-    KEYWORDS.put("ma", TokenType.TOKEN_MA);
-    KEYWORDS.put("SANO", TokenType.TOKEN_SANO);
-    KEYWORDS.put("THULO", TokenType.TOKEN_THULO);
-    KEYWORDS.put("CHHAINA", TokenType.TOKEN_CHHAINA);
-    KEYWORDS.put("rakha", TokenType.TOKEN_RAKHA);
-    KEYWORDS.put("barabar", TokenType.TOKEN_BARABAR);
+var KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
+fn init_keywords() !bool {
+    _ = try KEYWORDS.put("dekhau", TokenType.TOKEN_DEKHAU);
+    _ = try KEYWORDS.put("ghumau", TokenType.TOKEN_GHUMAU);
+    _ = try KEYWORDS.put("ma", TokenType.TOKEN_MA);
+    _ = try KEYWORDS.put("sano", TokenType.TOKEN_SANO);
+    _ = try KEYWORDS.put("thulo", TokenType.TOKEN_THULO);
+    _ = try KEYWORDS.put("chhaina", TokenType.TOKEN_CHHAINA);
+    _ = try KEYWORDS.put("rakha", TokenType.TOKEN_RAKHA);
+    _ = try KEYWORDS.put("barabar", TokenType.TOKEN_BARABAR);
+    return true;
 }
 
 pub const Token = struct { token_type: TokenType, lexeme: []const u8, literal: []const u8, line: usize, column: usize };
 
-pub fn token_new(token_type: TokenType, lexeme: []const u8, literal: []const u8, line: usize, column: usize) Token {
-    return Token{ .token_type = token_type, .lexeme = lexeme, .literal = literal, .line = line, .column = column };
-}
+pub fn Scanner(comptime source: []const u8) type {
+    const allocator = arena.allocator();
 
-// scanner to scan through the source code
-pub const Scanner = struct { source: []const u8, tokens: std.ArrayList(Token), current: usize, start: usize, line: usize, column: usize };
+    return struct {
+        source: []const u8 = source,
+        current: usize = 0,
+        start: usize = 0,
+        line: usize = 1,
+        column: usize = 1,
+        tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator),
+        const Self = @This();
 
-pub fn scanner_new(source: []const u8) Scanner {
-    return Scanner{ .source = source, .tokens = std.ArrayList(Token).init(allocator), .current = 0, .start = 0, .line = 1, .column = 1 };
-}
-
-pub fn scanner_scan_tokens(scanner: *Scanner) !std.ArrayList(Token) {
-    while (!scanner_is_at_end(scanner)) {
-        scanner.start = scanner.current;
-        const token = scanner_scan_token(scanner);
-        if (token.token_type != TokenType.TOKEN_NONE) {
-            _ = try scanner.tokens.append(token);
+        pub fn scanTokens(self: *Self) !std.ArrayList(Token) {
+            while (!self.isAtEnd()) {
+                self.start = self.current;
+                const token = self.scanToken();
+                if (token.token_type != TokenType.TOKEN_NONE) {
+                    _ = try self.tokens.append(token);
+                }
+            }
+            var endOfSource = Token{ .token_type = TokenType.TOKEN_EOF, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
+            _ = try self.tokens.append(endOfSource);
+            return self.tokens;
         }
-    }
-    var endOfSource = Token{ .token_type = TokenType.TOKEN_EOF, .lexeme = "", .literal = "", .line = scanner.line, .column = scanner.column };
-    _ = try scanner.tokens.append(endOfSource);
-    return scanner.tokens;
-}
 
-fn scanner_scan_token(scanner: *Scanner) Token {
-    const char = scanner_advance(scanner);
-    if (char == '"') {
-        while (true) {
-            var peek_value: u8 = scanner_peek(scanner);
-            var end: bool = scanner_is_at_end(scanner);
-            if (peek_value == '"' or end) {
-                break;
+        fn scanToken(self: *Self) Token {
+            const char = self.advance();
+            if (char == '"') {
+                while (true) {
+                    var peek_value: u8 = self.peek();
+                    var end: bool = self.isAtEnd();
+                    if (peek_value == '"' or end) {
+                        break;
+                    } else {
+                        _ = self.advance();
+                    }
+                }
+                if (self.isAtEnd()) {
+                    std.debug.print("SyntaxError: Unterminated string literal (detected at line {d})\n", .{self.line});
+                    return Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
+                }
+                _ = self.advance();
+                const lexeme = self.source[self.start + 1 .. self.current - 1];
+                return Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = lexeme, .literal = lexeme, .line = self.line, .column = self.column };
             } else {
-                _ = scanner_advance(scanner);
+                if (char == 10 or char == ' ') {
+                    return Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
+                }
+                return Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
             }
         }
-        if (scanner_is_at_end(scanner)) {
-            std.debug.print("SyntaxError: Unterminated string literal (detected at line {d})\n", .{scanner.line});
-            return token_new(TokenType.TOKEN_ERROR, "", "", scanner.line, scanner.line);
+
+        fn peek(self: *Self) u8 {
+            if (self.isAtEnd()) {
+                return 0;
+            }
+            return self.source[self.current];
         }
-        _ = scanner_advance(scanner);
-        const lexeme = scanner.source[scanner.start + 1 .. scanner.current - 1];
-        return token_new(TokenType.TOKEN_STRING, lexeme, lexeme, scanner.line, scanner.column);
-    } else {
-        if (char == 10 or char == ' ') {
-            return token_new(TokenType.TOKEN_NONE, "", "", scanner.line, scanner.column);
+
+        fn advance(self: *Self) u8 {
+            if (self.current < self.source.len) {
+                const now: usize = self.current;
+                self.current += 1;
+                return self.source[now];
+            } else {
+                return 0;
+            }
         }
-        return token_new(TokenType.TOKEN_ERROR, "", "", scanner.line, scanner.column);
+
+        fn isAtEnd(self: *Self) bool {
+            return self.current >= self.source.len;
+        }
+
+        pub fn destroy(self: *Self) void {
+            _ = self;
+            arena.deinit();
+        }
+    };
+}
+
+pub fn init() void {
+    if (init_keywords()) |status| {
+        _ = status;
+    } else |err| {
+        std.debug.print("Some error while initializing the scanner: {}\n", .{err});
     }
-}
-
-fn scanner_peek(scanner: *Scanner) u8 {
-    if (scanner_is_at_end(scanner)) {
-        return 0;
-    }
-    return scanner.source[scanner.current];
-}
-
-fn scanner_advance(scanner: *Scanner) u8 {
-    var now = scanner.current;
-    scanner.current += 1;
-    return scanner.source[now];
-}
-
-fn scanner_is_at_end(scanner: *Scanner) bool {
-    return scanner.current >= scanner.source.len;
 }
 
 pub fn token_dump(token: *const Token) void {
     std.debug.print("Token[ {}, {s}, {s} ]\n", .{ token.token_type, token.lexeme, token.literal });
-}
-
-pub fn scanner_destroy() void {
-    arena.deinit();
 }
