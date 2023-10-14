@@ -17,6 +17,7 @@
 
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+// var pointers_to_be_freed = std.ArrayList(type);
 
 pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_EOF };
 
@@ -33,99 +34,111 @@ fn init_keywords() !bool {
     return true;
 }
 
+//fn SyntaxError(msg: []const u8, token: Token) type {
+//return struct {
+//msg: []const u8 = msg,
+//token: Token = token,
+//const Self = @This();
+
+//fn dump(self: *Self) void {
+//_ = self;
+//}
+
+//fn to_string(self: *Self) []u8 {
+//return std.fmt.allocPrint(std.heap.page_allocator, "SyntaxError: {s}", .{self.msg});
+//}
+//};
+//}
+
 pub const Token = struct { token_type: TokenType, lexeme: []const u8, literal: []const u8, line: usize, column: usize };
 
 pub fn Scanner(comptime source: []const u8) type {
     const allocator = arena.allocator();
-
     return struct {
         source: []const u8 = source,
-        current: usize = 0,
-        start: usize = 0,
         line: usize = 1,
-        column: usize = 1,
         tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator),
         const Self = @This();
 
         pub fn scanTokens(self: *Self) !std.ArrayList(Token) {
-            // var source_lines = std.mem.splitAny([]const u8, self.source, '\n');
-            // while (source_lines.next()) |line| {
-            //     self.start = self.current;
-            //     self.column = 0;
-            //     var tokens = self.extractTokens(line);
-            //     _ = tokens;
-            // }
-
-            while (!self.isAtEnd()) {
-                self.start = self.current;
-                const token = self.scanToken();
-                if (token.token_type != TokenType.TOKEN_NONE) {
-                    _ = try self.tokens.append(token);
+            var source_lines = std.mem.split(u8, self.source, "\n");
+            while (source_lines.next()) |line| {
+                if (line.len == 0) {
+                    continue;
+                }
+                var tokens = try self.scanTokensLine(line);
+                for (tokens.items) |item| {
+                    _ = try self.tokens.append(item);
                 }
             }
-            var eof = Token{ .token_type = TokenType.TOKEN_EOF, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
+            const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = 0, .column = 0 };
             _ = try self.tokens.append(eof);
             return self.tokens;
         }
 
-        fn scanToken(self: *Self) Token {
-            const char = self.advance();
-            if (std.ascii.isDigit(char)) {
-                while (true) {
-                    var peek_value: u8 = self.peek();
-                    if (std.ascii.isDigit(peek_value) and !self.isAtEnd()) {
-                        _ = self.advance();
-                    } else {
-                        break;
+        fn scanTokensLine(self: *Self, line: []const u8) !std.ArrayList(Token) {
+            var pos: usize = 0;
+            var start: usize = 0;
+            var tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator);
+            const len: usize = line.len;
+            while (pos < len) {
+                start = pos;
+                if (std.ascii.isDigit(line[pos])) {
+                    pos = self.parseInt(pos, line);
+                    const literal = line[start..pos];
+                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = start };
+                    _ = try tokens.append(token);
+                } else if (line[pos] == '"' or line[pos] == '\'') {
+                    var tmpPos = self.parseStr(pos, line);
+                    if (tmpPos == 0xFFFFFFFF) {
+                        _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = start });
                     }
+                    pos = tmpPos;
+                    const literal = line[start + 1 .. pos];
+                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start };
+                    _ = try tokens.append(token);
+                    pos += 1; // advance past the end quotation
+                } else {
+                    _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = self.line, .column = 0 });
                 }
-                const literal = self.source[self.start..self.current];
-                _ = self.advance();
-                return Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = self.column };
-            } else if (char == '"' or char == '\'') {
-                while (true) {
-                    var peek_value: u8 = self.peek();
-                    var end: bool = self.isAtEnd();
-                    // if (peek_value == single_quote
-                    //         or peek_value == double_quote
-                    //          or scanner is at end)
-                    if (peek_value == char or end) {
-                        break;
-                    } else {
-                        _ = self.advance();
-                    }
-                }
-                if (self.isAtEnd()) {
-                    std.debug.print("SyntaxError: Unterminated string literal (detected at line {d}:{d})\n", .{ self.line, self.column });
-                    return Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
-                }
-                const lexeme = self.source[self.start + 1 .. self.current];
-                _ = self.advance();
-                return Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = lexeme, .literal = lexeme, .line = self.line, .column = self.column };
-            } else {
-                if (char == 10) {
-                    self.column = 0;
-                }
-                return Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = self.line, .column = self.column };
             }
+            return tokens;
         }
 
-        fn peek(self: *Self) u8 {
-            if (self.isAtEnd()) {
-                return 0;
+        fn parseInt(self: *Self, pos: usize, line: []const u8) usize {
+            _ = self;
+            var mutablePos: usize = pos;
+            const len = line.len;
+            mutablePos += 1;
+            if (mutablePos < len) {
+                const char = line[mutablePos];
+                while (mutablePos < len and std.ascii.isDigit(char)) {
+                    mutablePos += 1;
+                }
             }
-            return self.source[self.current];
+            return mutablePos;
         }
 
-        fn advance(self: *Self) u8 {
-            if (self.current < self.source.len) {
-                const now: usize = self.current;
-                self.current += 1;
-                self.column += 1;
-                return self.source[now];
-            } else {
-                return 0;
+        fn parseStr(self: *Self, pos: usize, line: []const u8) usize {
+            var mutablePos: usize = pos;
+            const quoteStyle = line[mutablePos];
+            const len = line.len;
+            mutablePos += 1;
+            if (mutablePos < len) {
+                while (true) {
+                    var isEnd: bool = mutablePos >= len;
+                    var _peek: u8 = line[mutablePos];
+                    if (_peek == quoteStyle or isEnd) {
+                        break;
+                    }
+                    mutablePos += 1;
+                }
+                if (mutablePos >= len) {
+                    std.debug.print("SyntaxError: Unterminated string literal (detected at line {d}:{d})\n", .{ self.line, mutablePos });
+                    return 0xFFFFFFFF;
+                }
             }
+            return mutablePos;
         }
 
         fn isAtEnd(self: *Self) bool {

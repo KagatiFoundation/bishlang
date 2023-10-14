@@ -20,7 +20,7 @@ const scanner = @import("./scanner.zig");
 
 pub fn main() !void {
     scanner.init();
-    var ss = scanner.Scanner("\"ram78++++\" + 78"){};
+    var ss = scanner.Scanner("'ramesh' 23"){};
     defer ss.destroy();
 
     var tokens = try ss.scanTokens();
