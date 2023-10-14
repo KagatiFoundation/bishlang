@@ -20,7 +20,7 @@ const scanner = @import("./scanner.zig");
 
 pub fn main() !void {
     scanner.init();
-    var ss = scanner.Scanner("\"hello\""){};
+    var ss = scanner.Scanner("\"ram78++++\" + 78"){};
     defer ss.destroy();
 
     var tokens = try ss.scanTokens();
