@@ -17,7 +17,6 @@
 
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-// var pointers_to_be_freed = std.ArrayList(type);
 
 pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_EOF };
 
@@ -34,23 +33,46 @@ fn init_keywords() !bool {
     return true;
 }
 
-//fn SyntaxError(msg: []const u8, token: Token) type {
-//return struct {
-//msg: []const u8 = msg,
-//token: Token = token,
-//const Self = @This();
+const ScannerError = struct {
+    pub const E = enum { SYNTAX_ERROR, UNTERMINATED_STR, INVALID_NUM_VALUE };
+    err_type: E,
+    err_subtype: E,
+    token: Token,
+    const Self = @This();
+    pub var errors = std.AutoHashMap(E, []const u8).init(std.heap.page_allocator);
 
-//fn dump(self: *Self) void {
-//_ = self;
-//}
+    fn init_errors() !bool {
+        _ = try errors.put(E.SYNTAX_ERROR, "SyntaxError");
+        _ = try errors.put(E.UNTERMINATED_STR, "Unterminated string literal");
+        _ = try errors.put(E.INVALID_NUM_VALUE, "Invalid numeric literal");
+        return true;
+    }
 
-//fn to_string(self: *Self) []u8 {
-//return std.fmt.allocPrint(std.heap.page_allocator, "SyntaxError: {s}", .{self.msg});
-//}
-//};
-//}
+    pub fn dump(self: Self) void {
+        var errt: []const u8 = undefined;
+        if (errors.get(self.err_type)) |value| {
+            errt = value;
+        }
+        var errst: []const u8 = undefined;
+        if (errors.get(self.err_subtype)) |value| {
+            errst = value;
+        }
+        std.debug.print("{s}: {s} (detected at line {d}:{d})\n", .{ errt, errst, self.token.line, self.token.column });
+    }
+};
 
-pub const Token = struct { token_type: TokenType, lexeme: []const u8, literal: []const u8, line: usize, column: usize };
+pub const Token = struct {
+    token_type: TokenType,
+    lexeme: []const u8,
+    literal: []const u8,
+    line: usize,
+    column: usize,
+    const Self = @This();
+
+    pub fn dump(self: Self) void {
+        std.debug.print("Token[ {?}, {s}, {s}, {d}:{d} ]\n", .{ self.token_type, self.lexeme, self.literal, self.line, self.column });
+    }
+};
 
 pub fn Scanner(comptime source: []const u8) type {
     const allocator = arena.allocator();
@@ -58,6 +80,8 @@ pub fn Scanner(comptime source: []const u8) type {
         source: []const u8 = source,
         line: usize = 1,
         tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator),
+        errors: std.ArrayList(ScannerError) = std.ArrayList(ScannerError).init(allocator),
+        has_error: bool = false,
         const Self = @This();
 
         pub fn scanTokens(self: *Self) !std.ArrayList(Token) {
@@ -71,6 +95,14 @@ pub fn Scanner(comptime source: []const u8) type {
                     _ = try self.tokens.append(item);
                 }
             }
+
+            // dumping errors(if any)
+            if (self.has_error) {
+                for (self.errors.items) |item| {
+                    item.dump();
+                }
+            }
+
             const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = 0, .column = 0 };
             _ = try self.tokens.append(eof);
             return self.tokens;
@@ -86,20 +118,21 @@ pub fn Scanner(comptime source: []const u8) type {
                 if (std.ascii.isDigit(line[pos])) {
                     pos = self.parseInt(pos, line);
                     const literal = line[start..pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = start };
+                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                 } else if (line[pos] == '"' or line[pos] == '\'') {
                     var tmpPos = self.parseStr(pos, line);
                     if (tmpPos == 0xFFFFFFFF) {
-                        _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = start });
+                        return tokens;
                     }
                     pos = tmpPos;
                     const literal = line[start + 1 .. pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start };
+                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                     pos += 1; // advance past the end quotation
                 } else {
-                    _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = self.line, .column = 0 });
+                    _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = 0, .column = 0 });
+                    pos += 1;
                 }
             }
             return tokens;
@@ -127,15 +160,21 @@ pub fn Scanner(comptime source: []const u8) type {
             if (mutablePos < len) {
                 while (true) {
                     var isEnd: bool = mutablePos >= len;
-                    var _peek: u8 = line[mutablePos];
-                    if (_peek == quoteStyle or isEnd) {
-                        break;
+                    if (!isEnd) {
+                        var _peek: u8 = line[mutablePos];
+                        if (_peek == quoteStyle) {
+                            break;
+                        }
+                        mutablePos += 1;
+                    } else {
+                        const errTok = Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = pos + 1 };
+                        var err = ScannerError{ .err_type = ScannerError.E.SYNTAX_ERROR, .err_subtype = ScannerError.E.UNTERMINATED_STR, .token = errTok };
+                        self.errors.append(err) catch |_err| {
+                            std.debug.print("{?}", .{_err});
+                        };
+                        self.has_error = true;
+                        return 0xFFFFFFFF;
                     }
-                    mutablePos += 1;
-                }
-                if (mutablePos >= len) {
-                    std.debug.print("SyntaxError: Unterminated string literal (detected at line {d}:{d})\n", .{ self.line, mutablePos });
-                    return 0xFFFFFFFF;
                 }
             }
             return mutablePos;
@@ -144,12 +183,6 @@ pub fn Scanner(comptime source: []const u8) type {
         fn isAtEnd(self: *Self) bool {
             return self.current >= self.source.len;
         }
-
-        pub fn destroy(self: *Self) void {
-            _ = self;
-            arena.deinit();
-            KEYWORDS.deinit();
-        }
     };
 }
 
@@ -157,10 +190,20 @@ pub fn init() void {
     if (init_keywords()) |status| {
         _ = status;
     } else |err| {
-        std.debug.print("Some error while initializing the scanner: {}\n", .{err});
+        std.debug.print("Some error while initializing the scanner: {?}\n", .{err});
+        return;
+    }
+
+    if (ScannerError.init_errors()) |status| {
+        _ = status;
+    } else |err| {
+        std.debug.print("Some error while initializing the scanner: {?}\n", .{err});
+        return;
     }
 }
 
-pub fn token_dump(token: *const Token) void {
-    std.debug.print("Token[ {}, {s}, {s} ]\n", .{ token.token_type, token.lexeme, token.literal });
+pub fn deinit() void {
+    arena.deinit();
+    KEYWORDS.deinit();
+    ScannerError.errors.deinit();
 }

@@ -20,11 +20,10 @@ const scanner = @import("./scanner.zig");
 
 pub fn main() !void {
     scanner.init();
-    var ss = scanner.Scanner("'ramesh' 23"){};
-    defer ss.destroy();
-
+    defer scanner.deinit();
+    var ss = scanner.Scanner("'ramesh'23"){};
     var tokens = try ss.scanTokens();
     for (tokens.items) |token| {
-        scanner.token_dump(&token);
+        token.dump();
     }
 }
