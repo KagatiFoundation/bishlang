@@ -18,7 +18,7 @@
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_EOF };
+pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_IDENTIFIER, TOKEN_EOF };
 
 var KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
 fn init_keywords() !bool {
@@ -37,6 +37,7 @@ const ScannerError = struct {
     pub const E = enum { SYNTAX_ERROR, UNTERMINATED_STR, INVALID_NUM_VALUE };
     err_type: E,
     err_subtype: E,
+    src_line: []const u8,
     token: Token,
     const Self = @This();
     pub var errors = std.AutoHashMap(E, []const u8).init(std.heap.page_allocator);
@@ -58,6 +59,12 @@ const ScannerError = struct {
             errst = value;
         }
         std.debug.print("{s}: {s} (detected at line {d}:{d})\n", .{ errt, errst, self.token.line, self.token.column });
+        std.debug.print("    {s}\n", .{self.src_line});
+        for (0..self.token.column - 1) |idx| {
+            _ = idx;
+            std.debug.print(" ", .{});
+        }
+        std.debug.print("    ^\n", .{});
     }
 };
 
@@ -118,7 +125,7 @@ pub fn Scanner(comptime source: []const u8) type {
                 if (std.ascii.isDigit(line[pos])) {
                     pos = self.parseInt(pos, line);
                     const literal = line[start..pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
+                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = "", .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                 } else if (line[pos] == '"' or line[pos] == '\'') {
                     var tmpPos = self.parseStr(pos, line);
@@ -127,9 +134,17 @@ pub fn Scanner(comptime source: []const u8) type {
                     }
                     pos = tmpPos;
                     const literal = line[start + 1 .. pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
+                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = "", .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                     pos += 1; // advance past the end quotation
+                } else if (std.ascii.isAlphabetic(line[pos]) or line[pos] == '_') {
+                    pos = self.parseKeywordOrIdentifier(pos, line);
+                    const lexeme = line[start..pos];
+                    var tok = Token{ .token_type = TokenType.TOKEN_IDENTIFIER, .lexeme = lexeme, .literal = "", .line = self.line, .column = start + 1 };
+                    if (KEYWORDS.get(lexeme)) |keywordTokType| {
+                        tok.token_type = keywordTokType;
+                    }
+                    _ = try tokens.append(tok);
                 } else {
                     _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = 0, .column = 0 });
                     pos += 1;
@@ -138,15 +153,37 @@ pub fn Scanner(comptime source: []const u8) type {
             return tokens;
         }
 
+        fn parseKeywordOrIdentifier(self: *Self, pos: usize, line: []const u8) usize {
+            _ = self;
+            var mutablePos: usize = pos;
+            mutablePos += 1; // skip past the first character
+            const len = line.len;
+            if (mutablePos < len) {
+                var char = line[mutablePos];
+                while (char == '_' or std.ascii.isAlphabetic(char) or std.ascii.isDigit(char)) {
+                    mutablePos += 1;
+                    if (mutablePos >= len) {
+                        break;
+                    }
+                    char = line[mutablePos];
+                }
+            }
+            return mutablePos;
+        }
+
         fn parseInt(self: *Self, pos: usize, line: []const u8) usize {
             _ = self;
             var mutablePos: usize = pos;
             const len = line.len;
             mutablePos += 1;
             if (mutablePos < len) {
-                const char = line[mutablePos];
+                var char = line[mutablePos];
                 while (mutablePos < len and std.ascii.isDigit(char)) {
                     mutablePos += 1;
+                    if (mutablePos >= len) {
+                        break;
+                    }
+                    char = line[mutablePos];
                 }
             }
             return mutablePos;
@@ -167,17 +204,24 @@ pub fn Scanner(comptime source: []const u8) type {
                         }
                         mutablePos += 1;
                     } else {
-                        const errTok = Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = pos + 1 };
-                        var err = ScannerError{ .err_type = ScannerError.E.SYNTAX_ERROR, .err_subtype = ScannerError.E.UNTERMINATED_STR, .token = errTok };
-                        self.errors.append(err) catch |_err| {
-                            std.debug.print("{?}", .{_err});
-                        };
-                        self.has_error = true;
+                        self.genUnterminatedStrErr(pos, line);
                         return 0xFFFFFFFF;
                     }
                 }
+            } else {
+                self.genUnterminatedStrErr(pos, line);
+                return 0xFFFFFFFF;
             }
             return mutablePos;
+        }
+
+        fn genUnterminatedStrErr(self: *Self, pos: usize, line: []const u8) void {
+            const errTok = Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = pos + 1 };
+            var err = ScannerError{ .err_type = ScannerError.E.SYNTAX_ERROR, .err_subtype = ScannerError.E.UNTERMINATED_STR, .token = errTok, .src_line = line };
+            self.errors.append(err) catch |_err| {
+                std.debug.print("{?}", .{_err});
+            };
+            self.has_error = true;
         }
 
         fn isAtEnd(self: *Self) bool {

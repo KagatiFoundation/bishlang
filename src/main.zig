@@ -21,7 +21,7 @@ const scanner = @import("./scanner.zig");
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
-    var ss = scanner.Scanner("'ramesh'23"){};
+    var ss = scanner.Scanner("3434''name"){};
     var tokens = try ss.scanTokens();
     for (tokens.items) |token| {
         token.dump();
