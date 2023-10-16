@@ -18,7 +18,7 @@
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_IDENTIFIER, TOKEN_EOF };
+pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_IDENTIFIER, TOKEN_SEMICOLON, TOKEN_STAR, TOKEN_SLASH, TOKEN_MINUS, TOKEN_EOF };
 
 var KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
 fn init_keywords() !bool {
@@ -85,7 +85,7 @@ pub fn Scanner(comptime source: []const u8) type {
     const allocator = arena.allocator();
     return struct {
         source: []const u8 = source,
-        line: usize = 1,
+        line: usize = 0,
         tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator),
         errors: std.ArrayList(ScannerError) = std.ArrayList(ScannerError).init(allocator),
         has_error: bool = false,
@@ -94,6 +94,7 @@ pub fn Scanner(comptime source: []const u8) type {
         pub fn scanTokens(self: *Self) !std.ArrayList(Token) {
             var source_lines = std.mem.split(u8, self.source, "\n");
             while (source_lines.next()) |line| {
+                self.line += 1; // increment line count by one
                 if (line.len == 0) {
                     continue;
                 }
@@ -122,12 +123,13 @@ pub fn Scanner(comptime source: []const u8) type {
             const len: usize = line.len;
             while (pos < len) {
                 start = pos;
-                if (std.ascii.isDigit(line[pos])) {
+                const char = line[pos];
+                if (std.ascii.isDigit(char)) {
                     pos = self.parseInt(pos, line);
                     const literal = line[start..pos];
                     const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = "", .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
-                } else if (line[pos] == '"' or line[pos] == '\'') {
+                } else if (char == '"' or char == '\'') {
                     var tmpPos = self.parseStr(pos, line);
                     if (tmpPos == 0xFFFFFFFF) {
                         return tokens;
@@ -137,16 +139,26 @@ pub fn Scanner(comptime source: []const u8) type {
                     const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = "", .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                     pos += 1; // advance past the end quotation
-                } else if (std.ascii.isAlphabetic(line[pos]) or line[pos] == '_') {
+                } else if (std.ascii.isAlphabetic(char) or char == '_') {
                     pos = self.parseKeywordOrIdentifier(pos, line);
                     const lexeme = line[start..pos];
-                    var tok = Token{ .token_type = TokenType.TOKEN_IDENTIFIER, .lexeme = lexeme, .literal = "", .line = self.line, .column = start + 1 };
+                    var tok = self._nonLiteralToken(TokenType.TOKEN_IDENTIFIER, lexeme, start + 1);
                     if (KEYWORDS.get(lexeme)) |keywordTokType| {
                         tok.token_type = keywordTokType;
                     }
                     _ = try tokens.append(tok);
                 } else {
-                    _ = try tokens.append(Token{ .token_type = TokenType.TOKEN_NONE, .lexeme = "", .literal = "", .line = 0, .column = 0 });
+                    if (char == '+') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PLUS, "+", start + 1));
+                    } else if (char == '-') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_MINUS, "-", start + 1));
+                    } else if (char == '*') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_STAR, "*", start + 1));
+                    } else if (char == '/') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SLASH, "/", start + 1));
+                    } else if (char == ';') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SEMICOLON, ";", start + 1));
+                    }
                     pos += 1;
                 }
             }
@@ -222,6 +234,10 @@ pub fn Scanner(comptime source: []const u8) type {
                 std.debug.print("{?}", .{_err});
             };
             self.has_error = true;
+        }
+
+        fn _nonLiteralToken(self: *Self, tok_type: TokenType, lexeme: []const u8, column: usize) Token {
+            return Token{ .token_type = tok_type, .lexeme = lexeme, .literal = "", .line = self.line, .column = column };
         }
 
         fn isAtEnd(self: *Self) bool {
