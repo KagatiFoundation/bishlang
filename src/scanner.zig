@@ -18,7 +18,7 @@
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_IDENTIFIER, TOKEN_SEMICOLON, TOKEN_STAR, TOKEN_SLASH, TOKEN_MINUS, TOKEN_EOF };
+pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_IDENTIFIER, TOKEN_SEMICOLON, TOKEN_STAR, TOKEN_SLASH, TOKEN_MINUS, TOKEN_LEFT_PAREN, TOKEN_RIGHT_PAREN, TOKEN_GALAT, TOKEN_SAHI, TOKEN_EOF };
 
 var KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
 fn init_keywords() !bool {
@@ -30,6 +30,8 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("chhaina", TokenType.TOKEN_CHHAINA);
     _ = try KEYWORDS.put("rakha", TokenType.TOKEN_RAKHA);
     _ = try KEYWORDS.put("barabar", TokenType.TOKEN_BARABAR);
+    _ = try KEYWORDS.put("galat", TokenType.TOKEN_GALAT);
+    _ = try KEYWORDS.put("sahi", TokenType.TOKEN_SAHI);
     return true;
 }
 
@@ -158,6 +160,10 @@ pub fn Scanner(comptime source: []const u8) type {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SLASH, "/", start + 1));
                     } else if (char == ';') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SEMICOLON, ";", start + 1));
+                    } else if (char == '(') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_LEFT_PAREN, "(", start + 1));
+                    } else if (char == ')') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, "(", start + 1));
                     }
                     pos += 1;
                 }
