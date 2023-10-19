@@ -14,7 +14,9 @@ Keywords = YADI, NATRA, DEKHAU, GHUMAU, PATAK, RAKHA, MA, BARABAR, CHHAINA,
 
 <jabasamma-statement> ::= JABASAMMA <boolean> { <statement-list> }
 
-<rakha-statement> ::= RAKHA <variable> MA <expression>
+<rakha-statement> ::= RAKHA <variable> MA <expression>;
+
+<dekhau-statement> ::= DEKHAU <expression>;
 
 <variable> ::= [a-z-A-Z]+[a-zA-Z0-9_]*?
 

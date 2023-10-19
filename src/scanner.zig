@@ -88,8 +88,7 @@ const ScannerError = struct {
         }
         std.debug.print("{s}: {s} (detected at line {d}:{d})\n", .{ errt, errst, self.token.line, self.token.column });
         std.debug.print("    {s}\n", .{self.src_line});
-        for (0..self.token.column - 1) |idx| {
-            _ = idx;
+        for (0..self.token.column - 1) |_| {
             std.debug.print(" ", .{});
         }
         std.debug.print("    ^\n", .{});
@@ -139,7 +138,7 @@ pub fn Scanner(comptime source: []const u8) type {
                 }
             }
 
-            const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = 0, .column = 0 };
+            const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = self.line, .column = 1 };
             _ = try self.tokens.append(eof);
             return self.tokens;
         }

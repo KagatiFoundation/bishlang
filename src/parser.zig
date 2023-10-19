@@ -20,7 +20,7 @@ const scanner = @import("./scanner.zig");
 const ast = @import("./ast.zig");
 
 pub const Parser = struct {
-    source: []const u8,
+    source_lines: std.mem.SplitIterator(u8, .sequence),
     tokens: std.ArrayList(scanner.Token),
     current: usize,
     tokens_len: usize,
@@ -28,7 +28,7 @@ pub const Parser = struct {
 
     pub fn init(source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
         return .{
-            .source = source,
+            .source_lines = std.mem.split(u8, source, "\n"),
             .tokens = tokens,
             .current = 0,
             .tokens_len = tokens.items.len,
@@ -50,7 +50,7 @@ pub const Parser = struct {
         var now: scanner.Token = self.peek();
         switch (now.token_type) {
             .TOKEN_DEKHAU => {
-                self.current += 1;
+                self.current += 1; // step past 'dekhau'
                 var dekhauStmt = self.parseDekhauStmt();
                 return dekhauStmt;
             },
@@ -64,6 +64,24 @@ pub const Parser = struct {
     fn parseDekhauStmt(self: *Self) ?ast.Stmt {
         var expr: ?ast.Expr = self.parsePrimary();
         if (expr) |exp| {
+            // DEKHAU <expression>;
+            // expecting ';' after expression
+            var now: scanner.Token = self.peek();
+            if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
+                if (now.token_type == scanner.TokenType.TOKEN_EOF) {
+                    self.reportErrorFatal(now, "expected ';' after expression but program reached end of file", null);
+                } else {
+                    var msgFmt = "chaiyeko ';' tara vetiyo '{s}'";
+                    var errorMsg: [msgFmt.len + 100]u8 = undefined; // easter egg - do not enter characters more than 100
+                    @memset(&errorMsg, 0);
+                    _ = std.fmt.bufPrint(&errorMsg, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |err| {
+                        std.debug.panic("{any}\n", .{err});
+                    };
+                    self.reportErrorFatal(now, &errorMsg, "yeslai hatayera ';' rakhnus");
+                }
+                return null;
+            }
+            self.current += 1; // skip ';' token
             return ast.Stmt{
                 .DekhauStmt = .{
                     .expr = exp,
@@ -73,25 +91,23 @@ pub const Parser = struct {
             std.debug.print("error: expected expression but found '{any}'\n", .{self.peek().lexeme});
             return null;
         }
-        self.current += 1;
-        return null;
     }
 
     fn parsePrimary(self: *Self) ?ast.Expr {
         var now: scanner.Token = self.peek();
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
-            self.current += 1;
+            self.current += 1; // skip 'sahi' token
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
-            self.current += 1;
+            self.current += 1; // skip 'galat' token
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_INT) {
-            self.current += 1;
+            self.current += 1; // skip '[0-9]+'(number) token
             return Parser.createLiteralExpr(.{ .Integer = std.fmt.parseInt(i32, now.literal, 10) catch |err| {
                 std.debug.panic("error parsing int: {any}\n", .{err});
             } });
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
-            self.current += 1;
+            self.current += 1; // skip '"[^"]*"'(string) token
             return Parser.createLiteralExpr(.{ .String = now.literal });
         }
         return null;
@@ -103,6 +119,32 @@ pub const Parser = struct {
                 .value = lit_val,
             },
         };
+    }
+
+    fn reportErrorFatal(self: *Self, token: scanner.Token, msg: []const u8, hint: ?[]const u8) void {
+        var idx: usize = 1;
+        var source_line: []const u8 = undefined;
+        while (self.source_lines.next()) |line| {
+            if (idx == token.line) {
+                source_line = line;
+                self.source_lines.reset();
+                break;
+            }
+            idx += 1;
+        }
+        std.debug.print("{d}:{d}: error: {s}\n", .{ token.line, token.column, msg });
+        std.debug.print("    {s}\n", .{source_line});
+        var spaces: [100]u8 = undefined;
+        @memset(&spaces, 0);
+        @memset(spaces[0 .. token.column - 1], ' ');
+        std.debug.print("{s}", .{spaces});
+        std.debug.print("    ^\n", .{});
+        if (hint) |_hint| {
+            std.debug.print("{s}", .{spaces});
+            std.debug.print("    |____\n", .{});
+            std.debug.print("{s}     ", .{spaces});
+            std.debug.print("    {s}\n", .{_hint});
+        }
     }
 
     fn peek(self: *Self) scanner.Token {
