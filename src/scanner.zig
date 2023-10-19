@@ -18,7 +18,33 @@
 const std = @import("std");
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
-pub const TokenType = enum { TOKEN_DEKHAU, TOKEN_GHUMAU, TOKEN_BARABAR, TOKEN_MA, TOKEN_THULO, TOKEN_SANO, TOKEN_CHHAINA, TOKEN_RAKHA, TOKEN_ERROR, TOKEN_STRING, TOKEN_NONE, TOKEN_PLUS, TOKEN_INT, TOKEN_FLOAT, TOKEN_IDENTIFIER, TOKEN_SEMICOLON, TOKEN_STAR, TOKEN_SLASH, TOKEN_MINUS, TOKEN_LEFT_PAREN, TOKEN_RIGHT_PAREN, TOKEN_GALAT, TOKEN_SAHI, TOKEN_EOF };
+pub const TokenType = enum {
+    TOKEN_DEKHAU, // dekhau = "print"
+    TOKEN_GHUMAU, // ghumau = "loop"
+    TOKEN_BARABAR, // barabar = "=="
+    TOKEN_MA, // ma = "="
+    TOKEN_THULO, // thulo = ">"
+    TOKEN_SANO, // sano = "<"
+    TOKEN_CHHAINA, // chhaina = "!"
+    TOKEN_RAKHA, // rakha = "var" | "let" | "const"
+    TOKEN_ERROR,
+    TOKEN_STRING,
+    TOKEN_NONE,
+    TOKEN_PLUS,
+    TOKEN_INT,
+    TOKEN_FLOAT,
+    TOKEN_IDENTIFIER,
+    TOKEN_SEMICOLON,
+    TOKEN_STAR,
+    TOKEN_SLASH,
+    TOKEN_MINUS,
+    TOKEN_LEFT_PAREN,
+    TOKEN_RIGHT_PAREN,
+    TOKEN_GALAT, // galat = "false"
+    TOKEN_SAHI, // sahi = "true"
+    TOKEN_POWER, // power = "**"
+    TOKEN_EOF,
+};
 
 var KEYWORDS = std.StringHashMap(TokenType).init(std.heap.page_allocator);
 fn init_keywords() !bool {
@@ -155,6 +181,13 @@ pub fn Scanner(comptime source: []const u8) type {
                     } else if (char == '-') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_MINUS, "-", start + 1));
                     } else if (char == '*') {
+                        if ((pos + 1) < len) {
+                            if (line[pos + 1] == '*') {
+                                _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_POWER, "**", start + 1));
+                                pos += 2;
+                                continue;
+                            }
+                        }
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_STAR, "*", start + 1));
                     } else if (char == '/') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SLASH, "/", start + 1));
