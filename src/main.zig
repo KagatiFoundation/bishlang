@@ -17,13 +17,55 @@
 
 const std = @import("std");
 const scanner = @import("./scanner.zig");
+const parser = @import("./parser.zig");
+const ast = @import("./ast.zig");
+
+pub const Interpreter = struct {
+    stmts: std.ArrayList(ast.Stmt),
+    const Self = @This();
+
+    pub fn interpret(self: *Self) void {
+        for (self.stmts.items) |stmt| {
+            switch (stmt) {
+                .DekhauStmt => |_| self.execDekhauStmt(stmt),
+                else => std.debug.print("Error\n", .{}),
+            }
+        }
+    }
+
+    fn execDekhauStmt(self: *Self, stmt: ast.Stmt) void {
+        _ = self;
+        switch (stmt) {
+            .DekhauStmt => |dekhau| {
+                switch (dekhau.expr) {
+                    .LiteralExpr => |lit| {
+                        switch (lit.value) {
+                            .Boolean => |boolVal| std.debug.print("{s}\n", .{switch (boolVal) {
+                                true => "sahi",
+                                false => "galat",
+                            }}),
+                            .Integer => |intVal| std.debug.print("{d}\n", .{intVal}),
+                            .String => |strVal| std.debug.print("{s}\n", .{strVal}),
+                            else => {},
+                        }
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+};
 
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
-    var ss = scanner.Scanner("dekhau chhaina _galat;"){};
-    var tokens = try ss.scanTokens();
-    for (tokens.items) |token| {
-        token.dump();
-    }
+
+    const source = "dekhau 'ramesh poudel';";
+    var ss = scanner.Scanner(source){};
+    var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
+    var p = parser.Parser.init(source, tokens);
+    var stmts: std.ArrayList(ast.Stmt) = try p.parse();
+    var interp = Interpreter{ .stmts = stmts };
+    interp.interpret();
 }
