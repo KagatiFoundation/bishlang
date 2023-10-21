@@ -29,6 +29,10 @@ pub const Expr = union(enum) {
         value: LiteralValueType,
     },
 
+    VariableExpr: struct {
+        var_name: []const u8,
+    },
+
     BinaryExpr: struct {
         left: *Expr,
         operator: []const u8,
@@ -37,11 +41,12 @@ pub const Expr = union(enum) {
 };
 
 pub const Stmt = union(enum) {
-    PrintStmt: struct {
+    DekhauStmt: struct {
         expr: Expr,
     },
 
-    DekhauStmt: struct {
+    RakhaStmt: struct {
+        var_name: []const u8,
         expr: Expr,
     },
 };

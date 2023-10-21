@@ -18,6 +18,7 @@
 const std = @import("std");
 const scanner = @import("./scanner.zig");
 const ast = @import("./ast.zig");
+const errorutil = @import("./utils//errorutil.zig");
 
 pub const Parser = struct {
     source_lines: std.mem.SplitIterator(u8, .sequence),
@@ -27,6 +28,7 @@ pub const Parser = struct {
     const Self = @This();
 
     pub fn init(source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
+        errorutil.initErrorEngine(source);
         return .{
             .source_lines = std.mem.split(u8, source, "\n"),
             .tokens = tokens,
@@ -54,11 +56,56 @@ pub const Parser = struct {
                 var dekhauStmt = self.parseDekhauStmt();
                 return dekhauStmt;
             },
+            .TOKEN_RAKHA => {
+                self.current += 1;
+                var rakhaStmt = self.parseRakhaStmt();
+                return rakhaStmt;
+            },
             else => {
                 self.current += 1;
                 return null;
             },
         }
+    }
+
+    fn parseRakhaStmt(self: *Self) ?ast.Stmt {
+        var var_name: scanner.Token = self.peek();
+        if (var_name.token_type != scanner.TokenType.TOKEN_IDENTIFIER) {
+            errorutil.reportErrorFatal(var_name, "'rakha' pacchi variable ko naam dinus", "yaha variable ko naam huna parchha");
+            return null;
+        }
+        self.current += 1; // skip past identifier name
+
+        var now: scanner.Token = self.peek(); // 'ma' keyword
+        if (now.token_type != scanner.TokenType.TOKEN_MA) {
+            errorutil.reportErrorFatal(now, "variable ko naam pachhi 'ma' lekhnus", "variable ma value store garna 'ma' keyword lekhnu parne hunchha");
+            return null;
+        }
+        self.current += 1; // skip past 'ma' keyword
+
+        now = self.peek();
+        if (now.token_type == scanner.TokenType.TOKEN_SEMICOLON or now.token_type == scanner.TokenType.TOKEN_EOF) {
+            errorutil.reportErrorFatal(now, "yaha tapaile variable ko lagi value dina parne hunchha", null);
+            return null;
+        }
+
+        var expr: ast.Expr = undefined;
+        if (self.parsePrimary()) |_expr| {
+            expr = _expr;
+        }
+
+        now = self.peek();
+        if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
+            errorutil.reportErrorFatal(now, "variable ma value rakhi sakepachhi ';' lekhnus", "yaha ';' lekhnus");
+            return null;
+        }
+        self.current += 1; // skip past ';'
+        return ast.Stmt{
+            .RakhaStmt = .{
+                .var_name = var_name.lexeme,
+                .expr = expr,
+            },
+        };
     }
 
     fn parseDekhauStmt(self: *Self) ?ast.Stmt {
@@ -69,7 +116,7 @@ pub const Parser = struct {
             var now: scanner.Token = self.peek();
             if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
                 if (now.token_type == scanner.TokenType.TOKEN_EOF) {
-                    self.reportErrorFatal(now, "expected ';' after expression but program reached end of file", null);
+                    errorutil.reportErrorFatal(now, "expected ';' after expression but program reached end of file", null);
                 } else {
                     var msgFmt = "chaiyeko ';' tara vetiyo '{s}'";
                     var errorMsg: [msgFmt.len + 100]u8 = undefined; // easter egg - do not enter characters more than 100
@@ -77,7 +124,7 @@ pub const Parser = struct {
                     _ = std.fmt.bufPrint(&errorMsg, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |err| {
                         std.debug.panic("{any}\n", .{err});
                     };
-                    self.reportErrorFatal(now, &errorMsg, "yeslai hatayera ';' rakhnus");
+                    errorutil.reportErrorFatal(now, &errorMsg, "yeslai hatayera ';' rakhnus");
                 }
                 return null;
             }
@@ -95,21 +142,23 @@ pub const Parser = struct {
 
     fn parsePrimary(self: *Self) ?ast.Expr {
         var now: scanner.Token = self.peek();
+        self.current += 1; // skip past primary token
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
-            self.current += 1; // skip 'sahi' token
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
-            self.current += 1; // skip 'galat' token
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_INT) {
-            self.current += 1; // skip '[0-9]+'(number) token
             return Parser.createLiteralExpr(.{ .Integer = std.fmt.parseInt(i32, now.literal, 10) catch |err| {
                 std.debug.panic("error parsing int: {any}\n", .{err});
             } });
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
-            self.current += 1; // skip '"[^"]*"'(string) token
             return Parser.createLiteralExpr(.{ .String = now.literal });
+        } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
+            return ast.Expr{
+                .VariableExpr = .{ .var_name = now.lexeme },
+            };
         }
+        self.current -= 1; // go back to whatever token was there before
         return null;
     }
 
@@ -121,29 +170,12 @@ pub const Parser = struct {
         };
     }
 
-    fn reportErrorFatal(self: *Self, token: scanner.Token, msg: []const u8, hint: ?[]const u8) void {
-        var idx: usize = 1;
-        var source_line: []const u8 = undefined;
-        while (self.source_lines.next()) |line| {
-            if (idx == token.line) {
-                source_line = line;
-                self.source_lines.reset();
-                break;
-            }
-            idx += 1;
-        }
-        std.debug.print("{d}:{d}: error: {s}\n", .{ token.line, token.column, msg });
-        std.debug.print("    {s}\n", .{source_line});
-        var spaces: [100]u8 = undefined;
-        @memset(&spaces, 0);
-        @memset(spaces[0 .. token.column - 1], ' ');
-        std.debug.print("{s}", .{spaces});
-        std.debug.print("    ^\n", .{});
-        if (hint) |_hint| {
-            std.debug.print("{s}", .{spaces});
-            std.debug.print("    |____\n", .{});
-            std.debug.print("{s}     ", .{spaces});
-            std.debug.print("    {s}\n", .{_hint});
+    fn expect(self: *Self, token: scanner.Token, msg: []const u8) bool {
+        var now: scanner.Token = self.peek();
+        if (now.token_type == token.token_type) {
+            return true;
+        } else {
+            errorutil.reportUnexpectedTokenError(token, msg);
         }
     }
 

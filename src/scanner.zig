@@ -154,7 +154,7 @@ pub fn Scanner(comptime source: []const u8) type {
                 if (std.ascii.isDigit(char)) {
                     pos = self.parseInt(pos, line);
                     const literal = line[start..pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = "", .literal = literal, .line = self.line, .column = start + 1 };
+                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                 } else if (char == '"' or char == '\'') {
                     var tmpPos = self.parseStr(pos, line);
@@ -163,7 +163,7 @@ pub fn Scanner(comptime source: []const u8) type {
                     }
                     pos = tmpPos;
                     const literal = line[start + 1 .. pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = "", .literal = literal, .line = self.line, .column = start + 1 };
+                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                     pos += 1; // advance past the end quotation
                 } else if (std.ascii.isAlphabetic(char) or char == '_') {
@@ -275,7 +275,7 @@ pub fn Scanner(comptime source: []const u8) type {
         }
 
         fn _nonLiteralToken(self: *Self, tok_type: TokenType, lexeme: []const u8, column: usize) Token {
-            return Token{ .token_type = tok_type, .lexeme = lexeme, .literal = "", .line = self.line, .column = column };
+            return Token{ .token_type = tok_type, .lexeme = lexeme, .literal = lexeme, .line = self.line, .column = column };
         }
 
         fn isAtEnd(self: *Self) bool {
