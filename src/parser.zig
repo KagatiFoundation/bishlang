@@ -25,7 +25,10 @@ pub const Parser = struct {
     tokens: std.ArrayList(scanner.Token),
     current: usize,
     tokens_len: usize,
-    const Self = @This();
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
+    const Self: type = @This();
 
     pub fn init(source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
         errorutil.initErrorEngine(source);
@@ -35,6 +38,16 @@ pub const Parser = struct {
             .current = 0,
             .tokens_len = tokens.items.len,
         };
+    }
+
+    pub fn deinit() void {
+        _ = allocator.deinit();
+        switch (gpa.deinit()) {
+            .leak => {
+                std.debug.panic("There was memory leak in this program!!!", .{});
+            },
+            else => {},
+        }
     }
 
     pub fn parse(self: *Self) !std.ArrayList(ast.Stmt) {
@@ -84,6 +97,7 @@ pub const Parser = struct {
         self.current += 1; // skip past 'ma' keyword
 
         now = self.peek();
+        var prev: scanner.Token = now; // if in case we reached the end of program/line and didn't find semicolon
         if (now.token_type == scanner.TokenType.TOKEN_SEMICOLON or now.token_type == scanner.TokenType.TOKEN_EOF) {
             errorutil.reportErrorFatal(now, "yaha tapaile variable ko lagi value dina parne hunchha", null);
             return null;
@@ -92,11 +106,18 @@ pub const Parser = struct {
         var expr: ast.Expr = undefined;
         if (self.parsePrimary()) |_expr| {
             expr = _expr;
+        } else {
+            errorutil.reportErrorFatal(now, "yeslai hatayera tapaile variable ko lagi value dinuhos", "yo yaha lekhna manahi gariyeko chha");
+            return null;
         }
 
         now = self.peek();
         if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
-            errorutil.reportErrorFatal(now, "variable ma value rakhi sakepachhi ';' lekhnus", "yaha ';' lekhnus");
+            if (now.token_type != scanner.TokenType.TOKEN_EOF) {
+                errorutil.reportUnexpectedTokenError(now, ";");
+            } else {
+                errorutil.reportErrorFatal(prev, "variable ma value rakhi sakepachhi ';' lekhnus", "yo pachhadi ';' lekhnus");
+            }
             return null;
         }
         self.current += 1; // skip past ';'
@@ -116,15 +137,13 @@ pub const Parser = struct {
             var now: scanner.Token = self.peek();
             if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
                 if (now.token_type == scanner.TokenType.TOKEN_EOF) {
-                    errorutil.reportErrorFatal(now, "expected ';' after expression but program reached end of file", null);
+                    errorutil.reportErrorFatal(now, "'expression' lekhi sakepachhi ';' lekhnu parne huncha tara program antim ma pugi sakechha", null);
                 } else {
-                    var msgFmt = "chaiyeko ';' tara vetiyo '{s}'";
-                    var errorMsg: [msgFmt.len + 100]u8 = undefined; // easter egg - do not enter characters more than 100
-                    @memset(&errorMsg, 0);
-                    _ = std.fmt.bufPrint(&errorMsg, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |err| {
-                        std.debug.panic("{any}\n", .{err});
+                    var arena: std.mem.Allocator = Parser.allocator.allocator();
+                    var msg: []u8 = std.fmt.allocPrint(arena, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |_err| {
+                        std.debug.panic("Error: {any}\n", .{_err});
                     };
-                    errorutil.reportErrorFatal(now, &errorMsg, "yeslai hatayera ';' rakhnus");
+                    arena.free(msg);
                 }
                 return null;
             }
@@ -135,7 +154,7 @@ pub const Parser = struct {
                 },
             };
         } else {
-            std.debug.print("error: expected expression but found '{any}'\n", .{self.peek().lexeme});
+            errorutil.reportErrorFatal(self.peek(), "yaha 'dekhau' statement ko lagi 'expression' dinus", null);
             return null;
         }
     }
@@ -154,9 +173,7 @@ pub const Parser = struct {
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
             return Parser.createLiteralExpr(.{ .String = now.literal });
         } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
-            return ast.Expr{
-                .VariableExpr = .{ .var_name = now.lexeme },
-            };
+            return .{ .VariableExpr = .{ .var_name = now.lexeme } };
         }
         self.current -= 1; // go back to whatever token was there before
         return null;
@@ -177,6 +194,13 @@ pub const Parser = struct {
         } else {
             errorutil.reportUnexpectedTokenError(token, msg);
         }
+    }
+
+    fn previous(self: *Self) ?scanner.Token {
+        if (self.current > 0) {
+            return self.tokens.items[self.current - 1];
+        }
+        return null;
     }
 
     fn peek(self: *Self) scanner.Token {

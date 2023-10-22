@@ -105,11 +105,12 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
 
-    const source = "rakha name ma sahi;\ndekhau namee;";
+    const source = "rakha name ma 4 dekhau name;";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
-    var p = parser.Parser.init(source, tokens);
+    var p: parser.Parser = parser.Parser.init(source, tokens);
+    defer parser.Parser.deinit();
     var stmts: std.ArrayList(ast.Stmt) = try p.parse();
-    var interp = Interpreter{ .stmts = stmts };
-    interp.interpret();
+    var int: Interpreter = Interpreter{ .stmts = stmts };
+    int.interpret();
 }

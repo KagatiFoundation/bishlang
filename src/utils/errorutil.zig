@@ -19,23 +19,29 @@ const scanner = @import("../scanner.zig");
 const std = @import("std");
 
 var _source: std.mem.SplitIterator(u8, .sequence) = undefined;
-var _alloc_main = std.heap.page_allocator;
-var _arena_alloc = std.heap.ArenaAllocator.init(_alloc_main);
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
 
 pub fn initErrorEngine(source: []const u8) void {
     _source = std.mem.split(u8, source, "\n");
 }
 
 pub fn deinitErrorEngine() void {
-    _arena_alloc.deinit();
+    _ = gpa.deinit();
+    allocator.deinit();
 }
 
 pub fn reportUnexpectedTokenError(actual: scanner.Token, expected: []const u8) void {
-    var tmp_alloc = _arena_alloc.allocator();
-    var msg = try std.fmt.allocPrint(tmp_alloc, "chaiyeko '{s}' tara vetiyo '{s}'", .{ actual.lexeme, expected });
-    var hint = try std.fmt.allocPrint(tmp_alloc, "yeslai hatayera '{s}' rakhnus", .{expected});
+    var tmp_alloc: std.mem.Allocator = allocator.allocator();
+    var msg: []u8 = std.fmt.allocPrint(tmp_alloc, "chaiyeko '{s}' tara vetiyo '{s}'", .{ expected, actual.lexeme }) catch |_err| {
+        std.debug.panic("Error: {any}\n", .{_err});
+    };
+    var hint: []u8 = std.fmt.allocPrint(tmp_alloc, "yeslai hatayera '{s}' rakhnus", .{expected}) catch |_err| {
+        std.debug.panic("Error: {any}\n", .{_err});
+    };
     reportErrorFatal(actual, msg, hint);
     tmp_alloc.free(msg);
+    tmp_alloc.free(hint);
 }
 
 pub fn reportErrorFatal(token: scanner.Token, msg: []const u8, hint: ?[]const u8) void {
@@ -55,11 +61,20 @@ pub fn reportErrorFatal(token: scanner.Token, msg: []const u8, hint: ?[]const u8
     @memset(&spaces, 0);
     @memset(spaces[0 .. token.column - 1], ' ');
     std.debug.print("{s}", .{spaces});
-    std.debug.print("    ^\n", .{});
-    if (hint) |_hint| {
-        std.debug.print("{s}", .{spaces});
-        std.debug.print("    |____\n", .{});
-        std.debug.print("{s}     ", .{spaces});
-        std.debug.print("    {s}\n", .{_hint});
+    std.debug.print("    ^", .{});
+
+    if (token.lexeme.len > 0) {
+        for (0..token.lexeme.len - 1) |_| {
+            std.debug.print("~", .{});
+        }
     }
+    if (hint) |_hint| {
+        if (_hint.len > 0) {
+            std.debug.print("\n{s}", .{spaces});
+            std.debug.print("    |____\n", .{});
+            std.debug.print("{s}     ", .{spaces});
+            std.debug.print("    {s}\n", .{_hint});
+        }
+    }
+    std.debug.print("\n", .{});
 }
