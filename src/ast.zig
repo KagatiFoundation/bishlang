@@ -49,4 +49,8 @@ pub const Stmt = union(enum) {
         var_name: []const u8,
         expr: Expr,
     },
+
+    ExprStmt: struct {
+        expr: Expr,
+    },
 };

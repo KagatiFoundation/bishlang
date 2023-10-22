@@ -28,6 +28,7 @@ pub const Parser = struct {
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
+    var exprs_allocated = std.ArrayList(*ast.Expr).init(allocator.allocator());
     const Self: type = @This();
 
     pub fn init(source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
@@ -41,7 +42,12 @@ pub const Parser = struct {
     }
 
     pub fn deinit() void {
+        var expr_dealloc: std.mem.Allocator = allocator.allocator();
+        for (exprs_allocated.items) |expr| {
+            expr_dealloc.destroy(expr);
+        }
         _ = allocator.deinit();
+
         switch (gpa.deinit()) {
             .leak => {
                 std.debug.panic("There was memory leak in this program!!!", .{});
@@ -66,19 +72,28 @@ pub const Parser = struct {
         switch (now.token_type) {
             .TOKEN_DEKHAU => {
                 self.current += 1; // step past 'dekhau'
-                var dekhauStmt = self.parseDekhauStmt();
-                return dekhauStmt;
+                var dekhau_stmt = self.parseDekhauStmt();
+                return dekhau_stmt;
             },
             .TOKEN_RAKHA => {
                 self.current += 1;
-                var rakhaStmt = self.parseRakhaStmt();
-                return rakhaStmt;
+                var rakha_stmt = self.parseRakhaStmt();
+                return rakha_stmt;
             },
             else => {
                 self.current += 1;
-                return null;
+                var expr_stmt = self.parseExprStmt();
+                return expr_stmt;
             },
         }
+    }
+
+    fn parseExprStmt(self: *Self) ?ast.Stmt {
+        var expr = self.parseExpr();
+        if (expr) |_expr| {
+            return ast.Stmt{ .ExprStmt = .{ .expr = _expr } };
+        }
+        return null;
     }
 
     fn parseRakhaStmt(self: *Self) ?ast.Stmt {
@@ -104,10 +119,9 @@ pub const Parser = struct {
         }
 
         var expr: ast.Expr = undefined;
-        if (self.parsePrimary()) |_expr| {
+        if (self.parseExpr()) |_expr| {
             expr = _expr;
         } else {
-            errorutil.reportErrorFatal(now, "yeslai hatayera tapaile variable ko lagi value dinuhos", "yo yaha lekhna manahi gariyeko chha");
             return null;
         }
 
@@ -130,7 +144,7 @@ pub const Parser = struct {
     }
 
     fn parseDekhauStmt(self: *Self) ?ast.Stmt {
-        var expr: ?ast.Expr = self.parsePrimary();
+        var expr: ?ast.Expr = self.parseExpr();
         if (expr) |exp| {
             // DEKHAU <expression>;
             // expecting ';' after expression
@@ -143,6 +157,7 @@ pub const Parser = struct {
                     var msg: []u8 = std.fmt.allocPrint(arena, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |_err| {
                         std.debug.panic("Error: {any}\n", .{_err});
                     };
+                    errorutil.reportErrorFatal(now, msg, null);
                     arena.free(msg);
                 }
                 return null;
@@ -154,9 +169,59 @@ pub const Parser = struct {
                 },
             };
         } else {
-            errorutil.reportErrorFatal(self.peek(), "yaha 'dekhau' statement ko lagi 'expression' dinus", null);
+            errorutil.reportErrorFatal(self.peek(), "yaha 'dekhau' statement ko lagi 'expression' dinuhos", null);
+            self.current += 1; // skip the erronous token
             return null;
         }
+    }
+
+    fn parseExpr(self: *Self) ?ast.Expr {
+        return self.parseAddition();
+    }
+
+    fn parseAddition(self: *Self) ?ast.Expr {
+        if (self.parsePrimary()) |left_side_expr| {
+            var now: scanner.Token = self.peek();
+            if (now.token_type == scanner.TokenType.TOKEN_PLUS or now.token_type == scanner.TokenType.TOKEN_MINUS) {
+                const operator = now.lexeme;
+                self.current += 1; // skip past '+' or '-'
+                if (self.parsePrimary()) |right_side_expr| {
+                    var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
+                    var leftt = tmp_alloc.create(ast.Expr) catch |errr| {
+                        std.debug.panic("Error: {any}\n", .{errr});
+                    };
+                    leftt.* = left_side_expr;
+                    Parser.exprs_allocated.append(leftt) catch |app_err| {
+                        std.debug.panic("Error: {any}\n", .{app_err});
+                    };
+
+                    var rightt = tmp_alloc.create(ast.Expr) catch |errr| {
+                        std.debug.panic("Error: {any}\n", .{errr});
+                    };
+                    rightt.* = right_side_expr;
+                    Parser.exprs_allocated.append(rightt) catch |app_err| {
+                        std.debug.panic("Error: {any}\n", .{app_err});
+                    };
+                    return ast.Expr{
+                        .BinaryExpr = .{
+                            .left = leftt,
+                            .operator = operator,
+                            .right = rightt,
+                        },
+                    };
+                } else {
+                    var arena: std.mem.Allocator = Parser.allocator.allocator();
+                    var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+                        std.debug.panic("Error: {any}\n", .{_err});
+                    };
+                    errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
+                    arena.free(msg);
+                }
+            } else {
+                return left_side_expr;
+            }
+        }
+        return null;
     }
 
     fn parsePrimary(self: *Self) ?ast.Expr {
@@ -174,9 +239,10 @@ pub const Parser = struct {
             return Parser.createLiteralExpr(.{ .String = now.literal });
         } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
             return .{ .VariableExpr = .{ .var_name = now.lexeme } };
+        } else {
+            self.current -= 1; // go back to whatever token was there before
+            return null;
         }
-        self.current -= 1; // go back to whatever token was there before
-        return null;
     }
 
     fn createLiteralExpr(lit_val: ast.LiteralValueType) ast.Expr {

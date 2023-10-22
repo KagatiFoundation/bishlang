@@ -30,6 +30,7 @@ pub const Interpreter = struct {
             switch (stmt) {
                 .DekhauStmt => |_| self.execDekhauStmt(stmt),
                 .RakhaStmt => |_| self.execRakhaStmt(stmt),
+                else => {},
             }
         }
     }
@@ -79,6 +80,24 @@ pub const Interpreter = struct {
         return switch (expr) {
             .LiteralExpr => |lit_expr| lit_expr.value,
             .VariableExpr => |_| self.evaluateVarExpr(expr),
+            .BinaryExpr => |_| self.evaluateBinaryExpr(expr),
+        };
+    }
+
+    fn evaluateBinaryExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+        return switch (expr) {
+            .BinaryExpr => |bin_expr| {
+                var left_evaled: ast.LiteralValueType = undefined;
+                if (self.evaluateExpr(bin_expr.left.*)) |_expr| {
+                    left_evaled = _expr;
+                }
+
+                var right_evaled: ast.LiteralValueType = undefined;
+                if (self.evaluateExpr(bin_expr.right.*)) |_expr| {
+                    right_evaled = _expr;
+                }
+                return self.computeBinaryLiteralVal(&left_evaled, &right_evaled, bin_expr.operator);
+            },
             else => null,
         };
     }
@@ -99,13 +118,31 @@ pub const Interpreter = struct {
             },
         }
     }
+
+    fn computeBinaryLiteralVal(self: *Self, left: *ast.LiteralValueType, right: *ast.LiteralValueType, operator: []const u8) ?ast.LiteralValueType {
+        _ = self;
+        switch (left.*) {
+            .Integer => |int| {
+                switch (right.*) {
+                    .Integer => |int2| {
+                        if (std.mem.eql(u8, operator, "+")) {
+                            return ast.LiteralValueType{ .Integer = int + int2 };
+                        }
+                    },
+                    else => return null,
+                }
+            },
+            else => return null,
+        }
+        return null;
+    }
 };
 
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
 
-    const source = "rakha name ma 4 dekhau name;";
+    const source = "rakha number ma 100; dekhau dekhau;";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     var p: parser.Parser = parser.Parser.init(source, tokens);
