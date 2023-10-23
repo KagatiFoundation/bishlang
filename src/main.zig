@@ -66,10 +66,7 @@ pub const Interpreter = struct {
 
     fn dumpLiteralValueType(lit: ast.LiteralValueType) void {
         switch (lit) {
-            .Boolean => |boolVal| std.debug.print("{s}\n", .{switch (boolVal) {
-                true => "sahi",
-                false => "galat",
-            }}),
+            .Boolean => |boolVal| std.debug.print("{s}\n", .{if (boolVal) "sahi" else "galat"}),
             .Integer => |intVal| std.debug.print("{d}\n", .{intVal}),
             .String => |strVal| std.debug.print("{s}\n", .{strVal}),
             else => {},
@@ -96,7 +93,7 @@ pub const Interpreter = struct {
                 if (self.evaluateExpr(bin_expr.right.*)) |_expr| {
                     right_evaled = _expr;
                 }
-                return self.computeBinaryLiteralVal(&left_evaled, &right_evaled, bin_expr.operator);
+                return self.computeBinaryLiteralVal(left_evaled, right_evaled, bin_expr.operator);
             },
             else => null,
         };
@@ -119,17 +116,34 @@ pub const Interpreter = struct {
         }
     }
 
-    fn computeBinaryLiteralVal(self: *Self, left: *ast.LiteralValueType, right: *ast.LiteralValueType, operator: []const u8) ?ast.LiteralValueType {
+    fn computeBinaryLiteralVal(self: *Self, left: ast.LiteralValueType, right: ast.LiteralValueType, operator: []const u8) ?ast.LiteralValueType {
         _ = self;
-        switch (left.*) {
+        switch (left) {
             .Integer => |int| {
-                switch (right.*) {
-                    .Integer => |int2| {
-                        if (std.mem.eql(u8, operator, "+")) {
-                            return ast.LiteralValueType{ .Integer = int + int2 };
-                        }
-                    },
-                    else => return null,
+                if (std.mem.eql(u8, operator, "+")) {
+                    return switch (right) {
+                        .Integer => |int2| ast.LiteralValueType{ .Integer = int + int2 },
+                        .Float => |float| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) + float },
+                        else => null,
+                    };
+                } else if (std.mem.eql(u8, operator, "-")) {
+                    return switch (right) {
+                        .Integer => |int2| ast.LiteralValueType{ .Integer = int - int2 },
+                        .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) - float2 },
+                        else => null,
+                    };
+                } else if (std.mem.eql(u8, operator, "*")) {
+                    return switch (right) {
+                        .Integer => |int2| ast.LiteralValueType{ .Integer = int * int2 },
+                        .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) * float2 },
+                        else => null,
+                    };
+                } else if (std.mem.eql(u8, operator, "/")) {
+                    return switch (right) {
+                        .Integer => |int2| ast.LiteralValueType{ .Integer = @divExact(int, int2) },
+                        .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) / float2 },
+                        else => null,
+                    };
                 }
             },
             else => return null,
@@ -142,7 +156,7 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
 
-    const source = "rakha number ma 100; dekhau dekhau;";
+    const source = "rakha number ma 23; dekhau number;";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     var p: parser.Parser = parser.Parser.init(source, tokens);

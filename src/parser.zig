@@ -180,35 +180,13 @@ pub const Parser = struct {
     }
 
     fn parseAddition(self: *Self) ?ast.Expr {
-        if (self.parsePrimary()) |left_side_expr| {
+        if (self.parseFactor()) |left_side_expr| {
             var now: scanner.Token = self.peek();
             if (now.token_type == scanner.TokenType.TOKEN_PLUS or now.token_type == scanner.TokenType.TOKEN_MINUS) {
-                const operator = now.lexeme;
+                const operator: []const u8 = now.lexeme;
                 self.current += 1; // skip past '+' or '-'
-                if (self.parsePrimary()) |right_side_expr| {
-                    var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
-                    var leftt = tmp_alloc.create(ast.Expr) catch |errr| {
-                        std.debug.panic("Error: {any}\n", .{errr});
-                    };
-                    leftt.* = left_side_expr;
-                    Parser.exprs_allocated.append(leftt) catch |app_err| {
-                        std.debug.panic("Error: {any}\n", .{app_err});
-                    };
-
-                    var rightt = tmp_alloc.create(ast.Expr) catch |errr| {
-                        std.debug.panic("Error: {any}\n", .{errr});
-                    };
-                    rightt.* = right_side_expr;
-                    Parser.exprs_allocated.append(rightt) catch |app_err| {
-                        std.debug.panic("Error: {any}\n", .{app_err});
-                    };
-                    return ast.Expr{
-                        .BinaryExpr = .{
-                            .left = leftt,
-                            .operator = operator,
-                            .right = rightt,
-                        },
-                    };
+                if (self.parseFactor()) |right_side_expr| {
+                    return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator);
                 } else {
                     var arena: std.mem.Allocator = Parser.allocator.allocator();
                     var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
@@ -216,11 +194,36 @@ pub const Parser = struct {
                     };
                     errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
                     arena.free(msg);
+                    return null;
                 }
-            } else {
-                return left_side_expr;
             }
+            return left_side_expr;
         }
+        // show unexpected token error here
+        return null;
+    }
+
+    fn parseFactor(self: *Self) ?ast.Expr {
+        if (self.parsePrimary()) |left_side_expr| {
+            var now: scanner.Token = self.peek();
+            if (now.token_type == scanner.TokenType.TOKEN_SLASH or now.token_type == scanner.TokenType.TOKEN_STAR) {
+                const operator: []const u8 = now.lexeme;
+                self.current += 1;
+                if (self.parsePrimary()) |right_side_expr| {
+                    return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator);
+                } else {
+                    var arena: std.mem.Allocator = Parser.allocator.allocator();
+                    var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+                        std.debug.panic("Error: {any}\n", .{_err});
+                    };
+                    errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
+                    arena.free(msg);
+                    return null;
+                }
+            }
+            return left_side_expr;
+        }
+        // show unexpected token error here
         return null;
     }
 
@@ -230,7 +233,7 @@ pub const Parser = struct {
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
-            return Parser.createLiteralExpr(.{ .Boolean = true });
+            return Parser.createLiteralExpr(.{ .Boolean = false });
         } else if (now.token_type == scanner.TokenType.TOKEN_INT) {
             return Parser.createLiteralExpr(.{ .Integer = std.fmt.parseInt(i32, now.literal, 10) catch |err| {
                 std.debug.panic("error parsing int: {any}\n", .{err});
@@ -243,6 +246,32 @@ pub const Parser = struct {
             self.current -= 1; // go back to whatever token was there before
             return null;
         }
+    }
+
+    fn createBinaryExpr(expr1: ast.Expr, expr2: ast.Expr, operator: []const u8) ast.Expr {
+        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
+        var leftt = tmp_alloc.create(ast.Expr) catch |errr| {
+            std.debug.panic("Error: {any}\n", .{errr});
+        };
+        leftt.* = expr1;
+        Parser.exprs_allocated.append(leftt) catch |app_err| {
+            std.debug.panic("Error: {any}\n", .{app_err});
+        };
+
+        var rightt = tmp_alloc.create(ast.Expr) catch |errr| {
+            std.debug.panic("Error: {any}\n", .{errr});
+        };
+        rightt.* = expr2;
+        Parser.exprs_allocated.append(rightt) catch |app_err| {
+            std.debug.panic("Error: {any}\n", .{app_err});
+        };
+        return ast.Expr{
+            .BinaryExpr = .{
+                .left = leftt,
+                .operator = operator,
+                .right = rightt,
+            },
+        };
     }
 
     fn createLiteralExpr(lit_val: ast.LiteralValueType) ast.Expr {
