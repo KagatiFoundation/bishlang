@@ -156,7 +156,7 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
 
-    const source = "rakha number ma 23; dekhau number;";
+    const source = "rakha number ma 23 ; 8989; dekhau *100;";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     var p: parser.Parser = parser.Parser.init(source, tokens);

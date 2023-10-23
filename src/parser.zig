@@ -59,8 +59,7 @@ pub const Parser = struct {
     pub fn parse(self: *Self) !std.ArrayList(ast.Stmt) {
         var stmts: std.ArrayList(ast.Stmt) = std.ArrayList(ast.Stmt).init(std.heap.page_allocator);
         while (!self.isAtEnd()) {
-            var stmtOrNull: ?ast.Stmt = self.parseStmt();
-            if (stmtOrNull) |stmt| {
+            if (self.parseStmt()) |stmt| {
                 _ = try stmts.append(stmt);
             }
         }
@@ -71,29 +70,39 @@ pub const Parser = struct {
         var now: scanner.Token = self.peek();
         switch (now.token_type) {
             .TOKEN_DEKHAU => {
-                self.current += 1; // step past 'dekhau'
-                var dekhau_stmt = self.parseDekhauStmt();
-                return dekhau_stmt;
+                self.current += 1; // step 'dekhau'
+                return self.parseDekhauStmt();
             },
             .TOKEN_RAKHA => {
-                self.current += 1;
-                var rakha_stmt = self.parseRakhaStmt();
-                return rakha_stmt;
+                self.current += 1; // skip 'rakha'
+                return self.parseRakhaStmt();
             },
-            else => {
+            .TOKEN_EOF => {
                 self.current += 1;
-                var expr_stmt = self.parseExprStmt();
-                return expr_stmt;
+                return null;
             },
+            else => return self.parseExprStmt(),
         }
     }
 
     fn parseExprStmt(self: *Self) ?ast.Stmt {
-        var expr = self.parseExpr();
-        if (expr) |_expr| {
-            return ast.Stmt{ .ExprStmt = .{ .expr = _expr } };
+        if (self.parseExpr()) |expr| {
+            var now: scanner.Token = self.peek();
+            if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
+                if (now.token_type != scanner.TokenType.TOKEN_EOF) {
+                    errorutil.reportUnexpectedTokenError(now, ";");
+                } else {
+                    errorutil.reportErrorFatal(now, "yaha ';' lekhnus", "yo pachhadi ';' lekhnus");
+                }
+                self.hopToNextStmt();
+                return null;
+            }
+            self.current += 1; // skip past ';'
+            return ast.Stmt{ .ExprStmt = .{ .expr = expr } };
+        } else {
+            self.hopToNextStmt();
+            return null;
         }
-        return null;
     }
 
     fn parseRakhaStmt(self: *Self) ?ast.Stmt {
@@ -118,34 +127,32 @@ pub const Parser = struct {
             return null;
         }
 
-        var expr: ast.Expr = undefined;
-        if (self.parseExpr()) |_expr| {
-            expr = _expr;
-        } else {
-            return null;
-        }
-
-        now = self.peek();
-        if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
-            if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                errorutil.reportUnexpectedTokenError(now, ";");
-            } else {
-                errorutil.reportErrorFatal(prev, "variable ma value rakhi sakepachhi ';' lekhnus", "yo pachhadi ';' lekhnus");
+        if (self.parseExpr()) |expr| {
+            now = self.peek();
+            if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
+                if (now.token_type != scanner.TokenType.TOKEN_EOF) {
+                    errorutil.reportUnexpectedTokenError(now, ";");
+                } else {
+                    errorutil.reportErrorFatal(prev, "variable ma value rakhi sakepachhi ';' lekhnus", "yo pachhadi ';' lekhnus");
+                }
+                self.hopToNextStmt();
+                return null;
             }
+            self.current += 1; // skip past ';'
+            return ast.Stmt{
+                .RakhaStmt = .{
+                    .var_name = var_name.lexeme,
+                    .expr = expr,
+                },
+            };
+        } else {
+            self.hopToNextStmt();
             return null;
         }
-        self.current += 1; // skip past ';'
-        return ast.Stmt{
-            .RakhaStmt = .{
-                .var_name = var_name.lexeme,
-                .expr = expr,
-            },
-        };
     }
 
     fn parseDekhauStmt(self: *Self) ?ast.Stmt {
-        var expr: ?ast.Expr = self.parseExpr();
-        if (expr) |exp| {
+        if (self.parseExpr()) |exp| {
             // DEKHAU <expression>;
             // expecting ';' after expression
             var now: scanner.Token = self.peek();
@@ -160,6 +167,7 @@ pub const Parser = struct {
                     errorutil.reportErrorFatal(now, msg, null);
                     arena.free(msg);
                 }
+                self.hopToNextStmt();
                 return null;
             }
             self.current += 1; // skip ';' token
@@ -169,14 +177,24 @@ pub const Parser = struct {
                 },
             };
         } else {
-            errorutil.reportErrorFatal(self.peek(), "yaha 'dekhau' statement ko lagi 'expression' dinuhos", null);
-            self.current += 1; // skip the erronous token
+            self.hopToNextStmt();
             return null;
         }
     }
 
     fn parseExpr(self: *Self) ?ast.Expr {
-        return self.parseAddition();
+        if (self.parseAddition()) |expr| {
+            return expr;
+        }
+
+        var now: scanner.Token = self.peek();
+        var arena: std.mem.Allocator = Parser.allocator.allocator();
+        var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+            std.debug.panic("Error: {any}\n", .{_err});
+        };
+        errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
+        arena.free(msg);
+        return null;
     }
 
     fn parseAddition(self: *Self) ?ast.Expr {
@@ -199,7 +217,6 @@ pub const Parser = struct {
             }
             return left_side_expr;
         }
-        // show unexpected token error here
         return null;
     }
 
@@ -208,7 +225,7 @@ pub const Parser = struct {
             var now: scanner.Token = self.peek();
             if (now.token_type == scanner.TokenType.TOKEN_SLASH or now.token_type == scanner.TokenType.TOKEN_STAR) {
                 const operator: []const u8 = now.lexeme;
-                self.current += 1;
+                self.current += 1; // skip past '*' or '/'
                 if (self.parsePrimary()) |right_side_expr| {
                     return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator);
                 } else {
@@ -223,13 +240,12 @@ pub const Parser = struct {
             }
             return left_side_expr;
         }
-        // show unexpected token error here
         return null;
     }
 
     fn parsePrimary(self: *Self) ?ast.Expr {
         var now: scanner.Token = self.peek();
-        self.current += 1; // skip past primary token
+        self.current += 1; // skip primary token
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
@@ -280,6 +296,23 @@ pub const Parser = struct {
                 .value = lit_val,
             },
         };
+    }
+
+    // skip to the token after next ';'
+    fn hopToNextStmt(self: *Self) void {
+        while (true) {
+            var now: scanner.Token = self.peek();
+            if (now.token_type != scanner.TokenType.TOKEN_NONE) {
+                var found: bool = now.token_type == scanner.TokenType.TOKEN_SEMICOLON;
+                if (found) {
+                    self.current += 1; // skip the ';'
+                    break;
+                }
+                self.current += 1;
+            } else {
+                break;
+            }
+        }
     }
 
     fn expect(self: *Self, token: scanner.Token, msg: []const u8) bool {
