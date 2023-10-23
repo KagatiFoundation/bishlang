@@ -138,7 +138,8 @@ pub fn Scanner(comptime source: []const u8) type {
                 }
             }
 
-            const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = self.line, .column = 1 };
+            const last_token: Token = self.tokens.getLast();
+            const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = self.line, .column = (last_token.column + last_token.lexeme.len) };
             _ = try self.tokens.append(eof);
             return self.tokens;
         }

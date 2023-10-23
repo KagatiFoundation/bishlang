@@ -60,21 +60,27 @@ pub fn reportErrorFatal(token: scanner.Token, msg: []const u8, hint: ?[]const u8
     var spaces: [100]u8 = undefined;
     @memset(&spaces, 0);
     @memset(spaces[0 .. token.column - 1], ' ');
-    std.debug.print("{s}", .{spaces});
+    printStrNTimes(" ", token.column - 1);
     std.debug.print("    ^", .{});
 
     if (token.lexeme.len > 0) {
-        for (0..token.lexeme.len - 1) |_| {
-            std.debug.print("~", .{});
-        }
+        printStrNTimes("~", token.lexeme.len - 1);
     }
     if (hint) |_hint| {
         if (_hint.len > 0) {
-            std.debug.print("\n{s}", .{spaces});
+            std.debug.print("\n", .{});
+            printStrNTimes(" ", token.column - 1);
             std.debug.print("    |____\n", .{});
-            std.debug.print("{s}     ", .{spaces});
+            std.debug.print("     ", .{});
+            printStrNTimes(" ", token.column - 1);
             std.debug.print("    {s}\n", .{_hint});
         }
     }
     std.debug.print("\n", .{});
+}
+
+fn printStrNTimes(char: []const u8, count: usize) void {
+    for (0..count) |_| {
+        std.debug.print("{s}", .{char});
+    }
 }

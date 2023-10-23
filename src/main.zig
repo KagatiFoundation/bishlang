@@ -156,12 +156,16 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
 
-    const source = "rakha number ma 23 ; 8989; dekhau *100;";
+    const source = "rakha a ma 12; rakha b ma 13; dekhau a + b dekhau";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
-    var p: parser.Parser = parser.Parser.init(source, tokens);
-    defer parser.Parser.deinit();
-    var stmts: std.ArrayList(ast.Stmt) = try p.parse();
-    var int: Interpreter = Interpreter{ .stmts = stmts };
-    int.interpret();
+    if (!ss.has_error) {
+        var p: parser.Parser = parser.Parser.init(source, tokens);
+        defer parser.Parser.deinit();
+        var stmts: std.ArrayList(ast.Stmt) = try p.parse();
+        if (!parser.has_error) {
+            var int: Interpreter = Interpreter{ .stmts = stmts };
+            int.interpret();
+        }
+    }
 }

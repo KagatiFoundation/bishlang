@@ -20,6 +20,8 @@ const scanner = @import("./scanner.zig");
 const ast = @import("./ast.zig");
 const errorutil = @import("./utils//errorutil.zig");
 
+pub var has_error: bool = false;
+
 pub const Parser = struct {
     source_lines: std.mem.SplitIterator(u8, .sequence),
     tokens: std.ArrayList(scanner.Token),
@@ -90,14 +92,13 @@ pub const Parser = struct {
             var now: scanner.Token = self.peek();
             if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
                 if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                    errorutil.reportUnexpectedTokenError(now, ";");
-                } else {
-                    errorutil.reportErrorFatal(now, "yaha ';' lekhnus", "yo pachhadi ';' lekhnus");
+                    errorutil.reportErrorFatal(now, "yaha ';' lekhnus", "yaha ';' lekhnus");
+                    has_error = true;
+                    self.hopToNextStmt();
+                    return null;
                 }
-                self.hopToNextStmt();
-                return null;
             }
-            self.current += 1; // skip past ';'
+            self.current += 1; // skip ';' or 'EOF' token
             return ast.Stmt{ .ExprStmt = .{ .expr = expr } };
         } else {
             self.hopToNextStmt();
@@ -108,6 +109,7 @@ pub const Parser = struct {
     fn parseRakhaStmt(self: *Self) ?ast.Stmt {
         var var_name: scanner.Token = self.peek();
         if (var_name.token_type != scanner.TokenType.TOKEN_IDENTIFIER) {
+            has_error = true;
             errorutil.reportErrorFatal(var_name, "'rakha' pacchi variable ko naam dinus", "yaha variable ko naam huna parchha");
             return null;
         }
@@ -115,6 +117,7 @@ pub const Parser = struct {
 
         var now: scanner.Token = self.peek(); // 'ma' keyword
         if (now.token_type != scanner.TokenType.TOKEN_MA) {
+            has_error = true;
             errorutil.reportErrorFatal(now, "variable ko naam pachhi 'ma' lekhnus", "variable ma value store garna 'ma' keyword lekhnu parne hunchha");
             return null;
         }
@@ -122,23 +125,17 @@ pub const Parser = struct {
 
         now = self.peek();
         var prev: scanner.Token = now; // if in case we reached the end of program/line and didn't find semicolon
-        if (now.token_type == scanner.TokenType.TOKEN_SEMICOLON or now.token_type == scanner.TokenType.TOKEN_EOF) {
-            errorutil.reportErrorFatal(now, "yaha tapaile variable ko lagi value dina parne hunchha", null);
-            return null;
-        }
-
         if (self.parseExpr()) |expr| {
             now = self.peek();
             if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
                 if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                    errorutil.reportUnexpectedTokenError(now, ";");
-                } else {
-                    errorutil.reportErrorFatal(prev, "variable ma value rakhi sakepachhi ';' lekhnus", "yo pachhadi ';' lekhnus");
+                    errorutil.reportErrorFatal(prev, "variable ma value rakhi sakepachhi ';' lekhnus", "yaha ';' lekhnus");
+                    has_error = true;
+                    self.hopToNextStmt();
+                    return null;
                 }
-                self.hopToNextStmt();
-                return null;
             }
-            self.current += 1; // skip past ';'
+            self.current += 1; // skip ';' or 'EOF' token
             return ast.Stmt{
                 .RakhaStmt = .{
                     .var_name = var_name.lexeme,
@@ -157,20 +154,19 @@ pub const Parser = struct {
             // expecting ';' after expression
             var now: scanner.Token = self.peek();
             if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
-                if (now.token_type == scanner.TokenType.TOKEN_EOF) {
-                    errorutil.reportErrorFatal(now, "'expression' lekhi sakepachhi ';' lekhnu parne huncha tara program antim ma pugi sakechha", null);
-                } else {
+                if (now.token_type != scanner.TokenType.TOKEN_EOF) {
                     var arena: std.mem.Allocator = Parser.allocator.allocator();
                     var msg: []u8 = std.fmt.allocPrint(arena, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |_err| {
                         std.debug.panic("Error: {any}\n", .{_err});
                     };
-                    errorutil.reportErrorFatal(now, msg, null);
+                    errorutil.reportErrorFatal(now, msg, "yaha ';' lekhnus");
                     arena.free(msg);
+                    has_error = true;
+                    self.hopToNextStmt();
+                    return null;
                 }
-                self.hopToNextStmt();
-                return null;
             }
-            self.current += 1; // skip ';' token
+            self.current += 1; // skip ';' or 'EOF' token
             return ast.Stmt{
                 .DekhauStmt = .{
                     .expr = exp,
@@ -189,11 +185,19 @@ pub const Parser = struct {
 
         var now: scanner.Token = self.peek();
         var arena: std.mem.Allocator = Parser.allocator.allocator();
-        var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
-            std.debug.panic("Error: {any}\n", .{_err});
-        };
-        errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
+        var msg: []u8 = undefined;
+        if (now.token_type == scanner.TokenType.TOKEN_EOF) {
+            msg = std.fmt.allocPrint(arena, "yaha expression aaunu parne huncha tara program antya ma pugisakechha", .{}) catch |_err| {
+                std.debug.panic("Error: {any}\n", .{_err});
+            };
+        } else {
+            msg = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+                std.debug.panic("Error: {any}\n", .{_err});
+            };
+        }
+        errorutil.reportErrorFatal(now, msg, "yaha expression lekhnus");
         arena.free(msg);
+        has_error = true;
         return null;
     }
 
@@ -212,6 +216,7 @@ pub const Parser = struct {
                     };
                     errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
                     arena.free(msg);
+                    has_error = true;
                     return null;
                 }
             }
@@ -235,6 +240,7 @@ pub const Parser = struct {
                     };
                     errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
                     arena.free(msg);
+                    has_error = true;
                     return null;
                 }
             }
