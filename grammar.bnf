@@ -28,11 +28,11 @@ Keywords = YADI, NATRA, DEKHAU, GHUMAU, PATAK, RAKHA, MA, BARABAR, CHHAINA,
 
 <condition> ::= [CHHAINA] <expression> <relational-operator> <expression>
 
-<expression> ::= <terminal> | <terminal> <addition-operator> <expression>
+<expression> :: = <addition>
 
-<terminal> ::= <factor> | <factor> <multiplication-operator> <terminal>
+<addition> ::= <factor> | <factor> <addition-operator> <expression>
 
-<factor> ::= <primary> | <primary> <power-operator> <factor>
+<factor> ::= <primary> | <primary> <multiplication-operator> <expression>
 
 <primary> ::= (<expression>) | <variable> | <string> | <number> | <boolean>
 

@@ -179,26 +179,20 @@ pub const Parser = struct {
     }
 
     fn parseExpr(self: *Self) ?ast.Expr {
-        if (self.parseAddition()) |expr| {
-            return expr;
-        }
-
+        if (self.parseTerm()) |expr| return expr;
         var now: scanner.Token = self.peek();
         var arena: std.mem.Allocator = Parser.allocator.allocator();
-        var msg: []u8 = undefined;
-        if (now.token_type == scanner.TokenType.TOKEN_EOF) {
-            msg = std.fmt.allocPrint(arena, "yaha expression aaunu parne huncha tara program antya ma pugisakechha", .{}) catch |_err| {
-                std.debug.panic("Error: {any}\n", .{_err});
-            };
-        } else {
-            msg = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
-                std.debug.panic("Error: {any}\n", .{_err});
-            };
-        }
-        errorutil.reportErrorFatal(now, msg, "yaha expression lekhnus");
+        var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+            std.debug.panic("Error: {any}\n", .{_err});
+        };
+        errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
         arena.free(msg);
         has_error = true;
         return null;
+    }
+
+    fn parseTerm(self: *Self) ?ast.Expr {
+        return self.parseAddition();
     }
 
     fn parseAddition(self: *Self) ?ast.Expr {
@@ -206,19 +200,8 @@ pub const Parser = struct {
             var now: scanner.Token = self.peek();
             if (now.token_type == scanner.TokenType.TOKEN_PLUS or now.token_type == scanner.TokenType.TOKEN_MINUS) {
                 const operator: []const u8 = now.lexeme;
-                self.current += 1; // skip past '+' or '-'
-                if (self.parseFactor()) |right_side_expr| {
-                    return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator);
-                } else {
-                    var arena: std.mem.Allocator = Parser.allocator.allocator();
-                    var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
-                        std.debug.panic("Error: {any}\n", .{_err});
-                    };
-                    errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
-                    arena.free(msg);
-                    has_error = true;
-                    return null;
-                }
+                self.current += 1; // skip '+' or '-' token
+                return if (self.parseTerm()) |right_side_expr| Parser.createBinaryExpr(left_side_expr, right_side_expr, operator) else return null;
             }
             return left_side_expr;
         }
@@ -227,22 +210,12 @@ pub const Parser = struct {
 
     fn parseFactor(self: *Self) ?ast.Expr {
         if (self.parsePrimary()) |left_side_expr| {
+            self.current += 1; // skip whatever primary token there was
             var now: scanner.Token = self.peek();
             if (now.token_type == scanner.TokenType.TOKEN_SLASH or now.token_type == scanner.TokenType.TOKEN_STAR) {
                 const operator: []const u8 = now.lexeme;
-                self.current += 1; // skip past '*' or '/'
-                if (self.parsePrimary()) |right_side_expr| {
-                    return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator);
-                } else {
-                    var arena: std.mem.Allocator = Parser.allocator.allocator();
-                    var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
-                        std.debug.panic("Error: {any}\n", .{_err});
-                    };
-                    errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
-                    arena.free(msg);
-                    has_error = true;
-                    return null;
-                }
+                self.current += 1; // skip '*' or '/' token
+                return if (self.parseTerm()) |right_side_expr| return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator) else null;
             }
             return left_side_expr;
         }
@@ -251,7 +224,6 @@ pub const Parser = struct {
 
     fn parsePrimary(self: *Self) ?ast.Expr {
         var now: scanner.Token = self.peek();
-        self.current += 1; // skip primary token
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
             return Parser.createLiteralExpr(.{ .Boolean = true });
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
@@ -265,7 +237,6 @@ pub const Parser = struct {
         } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
             return .{ .VariableExpr = .{ .var_name = now.lexeme } };
         } else {
-            self.current -= 1; // go back to whatever token was there before
             return null;
         }
     }
