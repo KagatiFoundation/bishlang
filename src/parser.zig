@@ -22,6 +22,21 @@ const errorutil = @import("./utils//errorutil.zig");
 
 pub var has_error: bool = false;
 
+// errors which may show up during parsing tokens
+const ParseError = error{
+    ParenNotClosed,
+    UnexpectedToken,
+};
+
+// result will be one of Error(ErrorTokenType, ErrorToken) or Success(Expr) after parsing statements
+const ParseResult = union(enum) {
+    Success: ast.Expr,
+    Error: struct {
+        err_token: scanner.Token,
+        err_type: ParseError,
+    },
+};
+
 pub const Parser = struct {
     source_lines: std.mem.SplitIterator(u8, .sequence),
     tokens: std.ArrayList(scanner.Token),
@@ -89,14 +104,9 @@ pub const Parser = struct {
 
     fn parseExprStmt(self: *Self) ?ast.Stmt {
         if (self.parseExpr()) |expr| {
-            var now: scanner.Token = self.peek();
-            if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
-                if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                    errorutil.reportErrorFatal(now, "yaha ';' lekhnus", "yaha ';' lekhnus");
-                    has_error = true;
-                    self.hopToNextStmt();
-                    return null;
-                }
+            if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
+                self.hopToNextStmt();
+                return null;
             }
             self.current += 1; // skip ';' or 'EOF' token
             return ast.Stmt{ .ExprStmt = .{ .expr = expr } };
@@ -123,17 +133,10 @@ pub const Parser = struct {
         }
         self.current += 1; // skip past 'ma' keyword
 
-        now = self.peek();
-        var prev: scanner.Token = now; // if in case we reached the end of program/line and didn't find semicolon
         if (self.parseExpr()) |expr| {
-            now = self.peek();
-            if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
-                if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                    errorutil.reportErrorFatal(prev, "variable ma value rakhi sakepachhi ';' lekhnus", "yaha ';' lekhnus");
-                    has_error = true;
-                    self.hopToNextStmt();
-                    return null;
-                }
+            if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
+                self.hopToNextStmt();
+                return null;
             }
             self.current += 1; // skip ';' or 'EOF' token
             return ast.Stmt{
@@ -152,19 +155,9 @@ pub const Parser = struct {
         if (self.parseExpr()) |exp| {
             // DEKHAU <expression>;
             // expecting ';' after expression
-            var now: scanner.Token = self.peek();
-            if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
-                if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                    var arena: std.mem.Allocator = Parser.allocator.allocator();
-                    var msg: []u8 = std.fmt.allocPrint(arena, "chaiyeko ';' tara vetiyo '{s}'", .{now.lexeme}) catch |_err| {
-                        std.debug.panic("Error: {any}\n", .{_err});
-                    };
-                    errorutil.reportErrorFatal(now, msg, "yaha ';' lekhnus");
-                    arena.free(msg);
-                    has_error = true;
-                    self.hopToNextStmt();
-                    return null;
-                }
+            if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
+                self.hopToNextStmt();
+                return null;
             }
             self.current += 1; // skip ';' or 'EOF' token
             return ast.Stmt{
@@ -179,66 +172,123 @@ pub const Parser = struct {
     }
 
     fn parseExpr(self: *Self) ?ast.Expr {
-        if (self.parseTerm()) |expr| return expr;
-        var now: scanner.Token = self.peek();
-        var arena: std.mem.Allocator = Parser.allocator.allocator();
-        var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
-            std.debug.panic("Error: {any}\n", .{_err});
-        };
-        errorutil.reportErrorFatal(now, msg, "yeslai hataunu hos");
-        arena.free(msg);
-        has_error = true;
-        return null;
-    }
-
-    fn parseTerm(self: *Self) ?ast.Expr {
-        return self.parseAddition();
-    }
-
-    fn parseAddition(self: *Self) ?ast.Expr {
-        if (self.parseFactor()) |left_side_expr| {
-            var now: scanner.Token = self.peek();
-            if (now.token_type == scanner.TokenType.TOKEN_PLUS or now.token_type == scanner.TokenType.TOKEN_MINUS) {
-                const operator: []const u8 = now.lexeme;
-                self.current += 1; // skip '+' or '-' token
-                return if (self.parseTerm()) |right_side_expr| Parser.createBinaryExpr(left_side_expr, right_side_expr, operator) else return null;
-            }
-            return left_side_expr;
+        switch (self.parseAddition()) {
+            .Success => |expr| return expr,
+            .Error => |err| {
+                has_error = true;
+                switch (err.err_type) {
+                    ParseError.ParenNotClosed => {
+                        errorutil.reportErrorFatal(err.err_token, "'(' suru garisakepacchi banda pani garnuhos", null);
+                    },
+                    ParseError.UnexpectedToken => {
+                        var arena: std.mem.Allocator = Parser.allocator.allocator();
+                        var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{err.err_token.lexeme}) catch |_err| {
+                            std.debug.panic("Error: {any}\n", .{_err});
+                        };
+                        errorutil.reportErrorFatal(err.err_token, msg, "yeslai hataunu hos");
+                        arena.free(msg);
+                    },
+                }
+                return null;
+            },
         }
-        return null;
     }
 
-    fn parseFactor(self: *Self) ?ast.Expr {
-        if (self.parsePrimary()) |left_side_expr| {
-            self.current += 1; // skip whatever primary token there was
-            var now: scanner.Token = self.peek();
-            if (now.token_type == scanner.TokenType.TOKEN_SLASH or now.token_type == scanner.TokenType.TOKEN_STAR) {
-                const operator: []const u8 = now.lexeme;
-                self.current += 1; // skip '*' or '/' token
-                return if (self.parseTerm()) |right_side_expr| return Parser.createBinaryExpr(left_side_expr, right_side_expr, operator) else null;
-            }
-            return left_side_expr;
+    fn parseAddition(self: *Self) ParseResult {
+        var left_expr_res: ParseResult = self.parseFactor();
+        switch (left_expr_res) {
+            .Success => |left_side_expr| {
+                var now: scanner.Token = self.peek();
+                if (now.token_type == scanner.TokenType.TOKEN_PLUS or now.token_type == scanner.TokenType.TOKEN_MINUS) {
+                    const operator: []const u8 = now.lexeme;
+                    self.current += 1; // skip '+' or '-' token
+                    var right_expr_res = self.parseAddition();
+                    return switch (right_expr_res) {
+                        .Success => |right_side_expr| ParseResult{
+                            .Success = Parser.createBinaryExpr(left_side_expr, right_side_expr, operator),
+                        },
+                        .Error => |_| right_expr_res,
+                    };
+                }
+                return ParseResult{ .Success = left_side_expr };
+            },
+            else => return left_expr_res,
         }
-        return null;
+        return Parser.unexpectedTokenErr(self.peek());
     }
 
-    fn parsePrimary(self: *Self) ?ast.Expr {
+    fn parseFactor(self: *Self) ParseResult {
+        var left_expr_res: ParseResult = self.parsePrimary();
+        switch (left_expr_res) {
+            .Success => |left_side_expr| {
+                self.current += 1;
+                var now: scanner.Token = self.peek();
+                if (now.token_type == scanner.TokenType.TOKEN_SLASH or now.token_type == scanner.TokenType.TOKEN_STAR) {
+                    const operator: []const u8 = now.lexeme;
+                    self.current += 1; // skip '*' or '/' token
+                    var right_expr_res = self.parseAddition();
+                    return switch (right_expr_res) {
+                        .Success => |right_side_expr| ParseResult{
+                            .Success = Parser.createBinaryExpr(left_side_expr, right_side_expr, operator),
+                        },
+                        .Error => |_| right_expr_res,
+                    };
+                }
+                return ParseResult{ .Success = left_side_expr };
+            },
+            else => return left_expr_res,
+        }
+        return Parser.unexpectedTokenErr(self.peek());
+    }
+
+    fn parsePrimary(self: *Self) ParseResult {
         var now: scanner.Token = self.peek();
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
-            return Parser.createLiteralExpr(.{ .Boolean = true });
+            return ParseResult{ .Success = Parser.createLiteralExpr(.{ .Boolean = true }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
-            return Parser.createLiteralExpr(.{ .Boolean = false });
+            return ParseResult{ .Success = Parser.createLiteralExpr(.{ .Boolean = false }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_INT) {
-            return Parser.createLiteralExpr(.{ .Integer = std.fmt.parseInt(i32, now.literal, 10) catch |err| {
+            return ParseResult{ .Success = Parser.createLiteralExpr(.{ .Integer = std.fmt.parseInt(i32, now.literal, 10) catch |err| {
                 std.debug.panic("error parsing int: {any}\n", .{err});
-            } });
+            } }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
-            return Parser.createLiteralExpr(.{ .String = now.literal });
+            return ParseResult{ .Success = Parser.createLiteralExpr(.{ .String = now.literal }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
-            return .{ .VariableExpr = .{ .var_name = now.lexeme } };
+            return ParseResult{ .Success = .{ .VariableExpr = .{ .var_name = now.lexeme } } };
+        } else if (now.token_type == scanner.TokenType.TOKEN_LEFT_PAREN) {
+            var left_paren: scanner.Token = now;
+            self.current += 1; // skip '('
+            var group_expr_res = self.parseAddition();
+            switch (group_expr_res) {
+                .Success => |group_expr| {
+                    var right_paren: scanner.Token = self.peek();
+                    if (right_paren.token_type != scanner.TokenType.TOKEN_RIGHT_PAREN) {
+                        return ParseResult{
+                            .Error = .{
+                                .err_token = left_paren,
+                                .err_type = ParseError.ParenNotClosed,
+                            },
+                        };
+                    }
+                    return ParseResult{ .Success = Parser.createGroupExpr(group_expr) };
+                },
+                .Error => |_| return Parser.unexpectedTokenErr(self.peek()),
+            }
         } else {
-            return null;
+            return Parser.unexpectedTokenErr(self.peek());
         }
+    }
+
+    fn createGroupExpr(expr: ast.Expr) ast.Expr {
+        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
+        var tmp_expr = tmp_alloc.create(ast.Expr) catch |err| {
+            std.debug.panic("Error: {any}\n", .{err});
+        };
+        tmp_expr.* = expr;
+        Parser.exprs_allocated.append(tmp_expr) catch |err| {
+            std.debug.panic("Error: {any}\n", .{err});
+        };
+        return ast.Expr{ .GroupExpr = .{ .expr = tmp_expr } };
     }
 
     fn createBinaryExpr(expr1: ast.Expr, expr2: ast.Expr, operator: []const u8) ast.Expr {
@@ -292,13 +342,33 @@ pub const Parser = struct {
         }
     }
 
-    fn expect(self: *Self, token: scanner.Token, msg: []const u8) bool {
+    // creates an unexpected token error instance at the current token
+    fn unexpectedTokenErr(token: scanner.Token) ParseResult {
+        return ParseResult{
+            .Error = .{
+                .err_token = token,
+                .err_type = ParseError.UnexpectedToken,
+            },
+        };
+    }
+
+    fn expectToken(self: *Self, expected_type: scanner.TokenType, token_lexeme: []const u8) bool {
         var now: scanner.Token = self.peek();
-        if (now.token_type == token.token_type) {
-            return true;
-        } else {
-            errorutil.reportUnexpectedTokenError(token, msg);
+        if (now.token_type != expected_type) {
+            var arena: std.mem.Allocator = Parser.allocator.allocator();
+            var msg: []u8 = std.fmt.allocPrint(arena, "chaiyeko '{s}' tara vetiyo '{s}'", .{ token_lexeme, now.lexeme }) catch |_err| {
+                std.debug.panic("Error: {any}\n", .{_err});
+            };
+            var hint: []u8 = std.fmt.allocPrint(arena, "yaha '{s}' lekhnus", .{token_lexeme}) catch |_err| {
+                std.debug.panic("Error: {any}\n", .{_err});
+            };
+            errorutil.reportErrorFatal(now, msg, hint);
+            arena.free(msg);
+            arena.free(hint);
+            has_error = true;
+            return false;
         }
+        return true;
     }
 
     fn previous(self: *Self) ?scanner.Token {

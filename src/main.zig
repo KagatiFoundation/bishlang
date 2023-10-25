@@ -78,6 +78,14 @@ pub const Interpreter = struct {
             .LiteralExpr => |lit_expr| lit_expr.value,
             .VariableExpr => |_| self.evaluateVarExpr(expr),
             .BinaryExpr => |_| self.evaluateBinaryExpr(expr),
+            .GroupExpr => |_| self.evaluateGroupExpr(expr),
+        };
+    }
+
+    fn evaluateGroupExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+        return switch (expr) {
+            .GroupExpr => |grp_expr| self.evaluateExpr(grp_expr.expr.*),
+            else => null,
         };
     }
 

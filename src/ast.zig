@@ -38,6 +38,10 @@ pub const Expr = union(enum) {
         operator: []const u8,
         right: *Expr,
     },
+
+    GroupExpr: struct {
+        expr: *Expr,
+    },
 };
 
 pub const Stmt = union(enum) {

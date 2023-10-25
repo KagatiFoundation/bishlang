@@ -196,7 +196,7 @@ pub fn Scanner(comptime source: []const u8) type {
                     } else if (char == '(') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_LEFT_PAREN, "(", start + 1));
                     } else if (char == ')') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, "(", start + 1));
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, ")", start + 1));
                     }
                     pos += 1;
                 }
