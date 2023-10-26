@@ -57,4 +57,14 @@ pub const Stmt = union(enum) {
     ExprStmt: struct {
         expr: Expr,
     },
+
+    YadiNatraStmt: struct {
+        condition: Expr,
+        yadi_sahi: *Stmt,
+        yadi_galat: *?Stmt,
+    },
+
+    BlockStmt: struct {
+        stmts: std.ArrayList(*Stmt),
+    },
 };

@@ -27,6 +27,11 @@ pub const TokenType = enum {
     TOKEN_SANO, // sano = "<"
     TOKEN_CHHAINA, // chhaina = "!"
     TOKEN_RAKHA, // rakha = "var" | "let" | "const"
+    KW_YADI,
+    KW_NATRA,
+    KW_SURU,
+    KW_ANTYA,
+    KW_JABASAMMA,
     TOKEN_ERROR,
     TOKEN_STRING,
     TOKEN_NONE,
@@ -58,6 +63,10 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("barabar", TokenType.TOKEN_BARABAR);
     _ = try KEYWORDS.put("galat", TokenType.TOKEN_GALAT);
     _ = try KEYWORDS.put("sahi", TokenType.TOKEN_SAHI);
+    _ = try KEYWORDS.put("yadi", TokenType.KW_YADI);
+    _ = try KEYWORDS.put("natra", TokenType.KW_NATRA);
+    _ = try KEYWORDS.put("suru", TokenType.KW_SURU);
+    _ = try KEYWORDS.put("antya", TokenType.KW_ANTYA);
     return true;
 }
 

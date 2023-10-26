@@ -27,11 +27,50 @@ pub const Interpreter = struct {
 
     pub fn interpret(self: *Self) void {
         for (self.stmts.items) |stmt| {
-            switch (stmt) {
-                .DekhauStmt => |_| self.execDekhauStmt(stmt),
-                .RakhaStmt => |_| self.execRakhaStmt(stmt),
-                else => {},
-            }
+            self.execStmt(stmt);
+        }
+    }
+
+    fn execStmt(self: *Self, stmt: ast.Stmt) void {
+        switch (stmt) {
+            .DekhauStmt => |_| self.execDekhauStmt(stmt),
+            .RakhaStmt => |_| self.execRakhaStmt(stmt),
+            .YadiNatraStmt => |_| self.execYadiNatraStmt(stmt),
+            .BlockStmt => |_| self.execBlockStmt(stmt),
+            else => {},
+        }
+    }
+
+    fn execBlockStmt(self: *Self, stmt: ast.Stmt) void {
+        switch (stmt) {
+            .BlockStmt => |block| {
+                for (block.stmts.items) |_stmt| {
+                    self.execStmt(_stmt.*);
+                }
+            },
+            else => {},
+        }
+    }
+
+    fn execYadiNatraStmt(self: *Self, stmt: ast.Stmt) void {
+        switch (stmt) {
+            .YadiNatraStmt => |yadi_natra| {
+                if (self.evaluateExpr(yadi_natra.condition)) |eval_res| {
+                    var condition: bool = switch (eval_res) {
+                        .Boolean => |bool_val| bool_val,
+                        .Integer => |int_val| int_val != 0,
+                        else => false,
+                    };
+                    if (condition) {
+                        self.execStmt(yadi_natra.yadi_sahi.*);
+                    } else {
+                        if (@intFromPtr(yadi_natra.yadi_galat) != 0xAAAAAAAAAAAAAAAA) { // 0xAAAAAAAAAAAAAAAA = undefined
+                            self.execStmt(yadi_natra.yadi_galat.*.?);
+                        }
+                    }
+                }
+            },
+            else => {},
         }
     }
 
@@ -163,8 +202,7 @@ pub const Interpreter = struct {
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
-
-    const source = "rakha a ma 12; rakha b ma 13; dekhau a + b dekhau";
+    const source: []const u8 = "yadi 0 dekhau '0';";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     if (!ss.has_error) {
