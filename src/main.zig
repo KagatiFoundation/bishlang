@@ -202,7 +202,7 @@ pub const Interpreter = struct {
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
-    const source: []const u8 = "yadi 0 dekhau '0';";
+    const source: []const u8 = "yadi 3 suru suru dekhau 'value true chha'; antya natra suru dekhau 'value galat chha'; antya";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     if (!ss.has_error) {

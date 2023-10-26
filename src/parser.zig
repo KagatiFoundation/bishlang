@@ -116,23 +116,47 @@ pub const Parser = struct {
     }
 
     fn parseExprStmt(self: *Self) ?ast.Stmt {
-        if (self.parseExpr()) |expr| {
-            if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
-                self.hopToNextStmt();
-                return null;
+        var possible_expr_tokens: [6]scanner.TokenType = [6]scanner.TokenType{
+            scanner.TokenType.TOKEN_IDENTIFIER,
+            scanner.TokenType.TOKEN_INT,
+            scanner.TokenType.TOKEN_STRING,
+            scanner.TokenType.TOKEN_SAHI,
+            scanner.TokenType.TOKEN_GALAT,
+            scanner.TokenType.TOKEN_FLOAT,
+        };
+        var ok: bool = false;
+        var now: scanner.Token = self.peek();
+        for (possible_expr_tokens) |tt| {
+            if (now.token_type == tt) {
+                ok = true; // token is parsable
+                break;
             }
-            self.current += 1; // skip ';' or 'EOF' token
-            return ast.Stmt{ .ExprStmt = .{ .expr = expr } };
-        } else {
-            self.hopToNextStmt();
-            return null;
         }
+
+        if (ok) {
+            if (self.parseExpr()) |expr| {
+                if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
+                    self.hopToNextStmt();
+                    return null;
+                }
+                self.current += 1; // skip ';' or 'EOF' token
+                return ast.Stmt{ .ExprStmt = .{ .expr = expr } };
+            }
+        } else {
+            var arena: std.mem.Allocator = Parser.allocator.allocator();
+            var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+                std.debug.panic("Error: {any}\n", .{_err});
+            };
+            errorutil.reportErrorFatal(now, msg, null);
+            arena.free(msg);
+        }
+        self.hopToNextStmt();
+        return null;
     }
 
     fn parseYadiStmt(self: *Self) ?ast.Stmt {
         var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
-        var con_expr: ?ast.Expr = self.parseExpr();
-        if (con_expr) |expr| {
+        if (self.parseExpr()) |expr| {
             var yadi_sahi: *ast.Stmt = undefined;
             if (self.parseStmt()) |ys| {
                 yadi_sahi = tmp_alloc.create(ast.Stmt) catch |errr| {
@@ -156,7 +180,7 @@ pub const Parser = struct {
                     Parser.stmts_allocated.append(&yadi_galat.*.?) catch |app_err| {
                         std.debug.panic("Error: {any}\n", .{app_err});
                     };
-                }
+                } else return null;
             }
             return ast.Stmt{
                 .YadiNatraStmt = .{
@@ -177,7 +201,7 @@ pub const Parser = struct {
         var stmts: std.ArrayList(*ast.Stmt) = std.ArrayList(*ast.Stmt).init(Parser.allocator.allocator());
         while (true) {
             var now: scanner.Token = self.peek();
-            if (now.token_type == scanner.TokenType.KW_ANTYA or self.isAtEnd()) {
+            if (now.token_type == scanner.TokenType.KW_ANTYA or now.token_type == scanner.TokenType.TOKEN_EOF) {
                 break;
             }
             if (self.parseStmt()) |stmt| {
@@ -191,11 +215,16 @@ pub const Parser = struct {
                 stmts.append(tmp_stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
                 };
+            } else {
+                stmts.deinit();
+                self.hopToNextStmt();
+                break;
             }
         }
 
-        if (self.isAtEnd()) {
+        if (self.peek().token_type != scanner.TokenType.KW_ANTYA) {
             has_error = true;
+            stmts.deinit();
             errorutil.reportErrorFatal(block_start_token, "'suru' garisakepachhi 'antya' pani garnus", null);
             return null;
         }
