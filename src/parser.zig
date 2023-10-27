@@ -312,55 +312,64 @@ pub const Parser = struct {
         }
     }
 
-    fn parseAddition(self: *Self) ParseResult {
-        var left_expr_res: ParseResult = self.parseFactor();
-        switch (left_expr_res) {
-            .Success => |left_side_expr| {
-                var now: scanner.Token = self.peek();
-                if (now.token_type == scanner.TokenType.TOKEN_PLUS or now.token_type == scanner.TokenType.TOKEN_MINUS) {
-                    const operator: []const u8 = now.lexeme;
-                    self.current += 1; // skip '+' or '-' token
-                    var right_expr_res = self.parseAddition();
-                    return switch (right_expr_res) {
-                        .Success => |right_side_expr| ParseResult{
-                            .Success = Parser.createBinaryExpr(left_side_expr, right_side_expr, operator),
-                        },
-                        .Error => |_| right_expr_res,
-                    };
-                }
-                return ParseResult{ .Success = left_side_expr };
-            },
-            else => return left_expr_res,
-        }
-        return Parser.unexpectedTokenErr(self.peek());
+    inline fn parseAddition(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parseFactor(),
+            &[2]scanner.TokenType{ scanner.TokenType.TOKEN_PLUS, scanner.TokenType.TOKEN_MINUS },
+        );
     }
 
-    fn parseFactor(self: *Self) ParseResult {
-        var left_expr_res: ParseResult = self.parsePrimary();
-        switch (left_expr_res) {
+    inline fn parseFactor(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parsePower(),
+            &[2]scanner.TokenType{ scanner.TokenType.TOKEN_STAR, scanner.TokenType.TOKEN_SLASH },
+        );
+    }
+
+    inline fn parsePower(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parsePrimary(),
+            &[1]scanner.TokenType{scanner.TokenType.TOKEN_POWER},
+        );
+    }
+
+    fn tryParsingBinaryExpr(self: *Self, left_side_res: ParseResult, tokens: []const scanner.TokenType) ParseResult {
+        switch (left_side_res) {
             .Success => |left_side_expr| {
-                self.current += 1;
+                var operator: []const u8 = undefined;
                 var now: scanner.Token = self.peek();
-                if (now.token_type == scanner.TokenType.TOKEN_SLASH or now.token_type == scanner.TokenType.TOKEN_STAR) {
-                    const operator: []const u8 = now.lexeme;
-                    self.current += 1; // skip '*' or '/' token
-                    var right_expr_res = self.parseAddition();
-                    return switch (right_expr_res) {
-                        .Success => |right_side_expr| ParseResult{
-                            .Success = Parser.createBinaryExpr(left_side_expr, right_side_expr, operator),
-                        },
-                        .Error => |_| right_expr_res,
-                    };
+                var ok: bool = false;
+                for (tokens) |token| {
+                    if (token == now.token_type) {
+                        operator = now.lexeme;
+                        ok = true;
+                        break;
+                    }
                 }
-                return ParseResult{ .Success = left_side_expr };
+                if (ok) {
+                    self.current += 1; // skip the binary operator
+                    var right_side_res: ParseResult = self.parseAddition();
+                    return switch (right_side_res) {
+                        .Success => |right_side_expr| ParseResult{
+                            .Success = Parser.createBinaryExpr(
+                                left_side_expr,
+                                right_side_expr,
+                                operator,
+                            ),
+                        },
+                        .Error => |_| right_side_res,
+                    };
+                } else {
+                    return ParseResult{ .Success = left_side_expr };
+                }
             },
-            else => return left_expr_res,
+            else => return left_side_res,
         }
-        return Parser.unexpectedTokenErr(self.peek());
     }
 
     fn parsePrimary(self: *Self) ParseResult {
         var now: scanner.Token = self.peek();
+        self.current += 1;
         if (now.token_type == scanner.TokenType.TOKEN_SAHI) {
             return ParseResult{ .Success = Parser.createLiteralExpr(.{ .Boolean = true }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_GALAT) {
@@ -393,7 +402,8 @@ pub const Parser = struct {
                 .Error => |_| return Parser.unexpectedTokenErr(self.peek()),
             }
         } else {
-            return Parser.unexpectedTokenErr(self.peek());
+            self.current -= 1;
+            return Parser.unexpectedTokenErr(now);
         }
     }
 

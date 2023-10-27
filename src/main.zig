@@ -191,6 +191,12 @@ pub const Interpreter = struct {
                         .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) / float2 },
                         else => null,
                     };
+                } else if (std.mem.eql(u8, operator, "**")) {
+                    return switch (right) {
+                        .Integer => |int2| ast.LiteralValueType{ .Integer = std.math.pow(i32, int, int2) },
+                        .Float => |float2| ast.LiteralValueType{ .Float = std.math.pow(f32, @as(f32, @floatFromInt(int)), float2) },
+                        else => null,
+                    };
                 }
             },
             else => return null,
@@ -202,7 +208,7 @@ pub const Interpreter = struct {
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
-    const source: []const u8 = "yadi 3 suru suru dekhau 'value true chha'; antya natra suru dekhau 'value galat chha'; antya";
+    const source: []const u8 = "rakha a ma 2 ** 2; dekhau a";
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     if (!ss.has_error) {
