@@ -32,6 +32,8 @@ pub const TokenType = enum {
     KW_SURU,
     KW_ANTYA,
     KW_JABASAMMA,
+    KW_YA, // || operator
+    KW_RA, // && operator
     TOKEN_ERROR,
     TOKEN_STRING,
     TOKEN_NONE,
@@ -67,6 +69,8 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("natra", TokenType.KW_NATRA);
     _ = try KEYWORDS.put("suru", TokenType.KW_SURU);
     _ = try KEYWORDS.put("antya", TokenType.KW_ANTYA);
+    _ = try KEYWORDS.put("ra", TokenType.KW_RA);
+    _ = try KEYWORDS.put("ya", TokenType.KW_YA);
     return true;
 }
 

@@ -150,6 +150,7 @@ pub const Parser = struct {
             errorutil.reportErrorFatal(now, msg, null);
             arena.free(msg);
         }
+        has_error = true;
         self.hopToNextStmt();
         return null;
     }
@@ -290,7 +291,7 @@ pub const Parser = struct {
     }
 
     fn parseExpr(self: *Self) ?ast.Expr {
-        switch (self.parseAddition()) {
+        switch (self.parseLogicalOr()) {
             .Success => |expr| return expr,
             .Error => |err| {
                 has_error = true;
@@ -310,6 +311,20 @@ pub const Parser = struct {
                 return null;
             },
         }
+    }
+
+    inline fn parseLogicalOr(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parseLogicalAnd(),
+            &[1]scanner.TokenType{scanner.TokenType.KW_YA},
+        );
+    }
+
+    inline fn parseLogicalAnd(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parseAddition(),
+            &[1]scanner.TokenType{scanner.TokenType.KW_RA},
+        );
     }
 
     inline fn parseAddition(self: *Self) ParseResult {

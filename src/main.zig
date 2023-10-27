@@ -19,6 +19,7 @@ const std = @import("std");
 const scanner = @import("./scanner.zig");
 const parser = @import("./parser.zig");
 const ast = @import("./ast.zig");
+const bu = @import("./utils//bishutil.zig");
 
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
@@ -140,7 +141,7 @@ pub const Interpreter = struct {
                 if (self.evaluateExpr(bin_expr.right.*)) |_expr| {
                     right_evaled = _expr;
                 }
-                return self.computeBinaryLiteralVal(left_evaled, right_evaled, bin_expr.operator);
+                return Interpreter.computeBinaryLiteralVal(left_evaled, right_evaled, bin_expr.operator);
             },
             else => null,
         };
@@ -163,52 +164,74 @@ pub const Interpreter = struct {
         }
     }
 
-    fn computeBinaryLiteralVal(self: *Self, left: ast.LiteralValueType, right: ast.LiteralValueType, operator: []const u8) ?ast.LiteralValueType {
-        _ = self;
-        switch (left) {
-            .Integer => |int| {
-                if (std.mem.eql(u8, operator, "+")) {
-                    return switch (right) {
-                        .Integer => |int2| ast.LiteralValueType{ .Integer = int + int2 },
-                        .Float => |float| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) + float },
-                        else => null,
-                    };
-                } else if (std.mem.eql(u8, operator, "-")) {
-                    return switch (right) {
-                        .Integer => |int2| ast.LiteralValueType{ .Integer = int - int2 },
-                        .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) - float2 },
-                        else => null,
-                    };
-                } else if (std.mem.eql(u8, operator, "*")) {
-                    return switch (right) {
-                        .Integer => |int2| ast.LiteralValueType{ .Integer = int * int2 },
-                        .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) * float2 },
-                        else => null,
-                    };
-                } else if (std.mem.eql(u8, operator, "/")) {
-                    return switch (right) {
-                        .Integer => |int2| ast.LiteralValueType{ .Integer = @divExact(int, int2) },
-                        .Float => |float2| ast.LiteralValueType{ .Float = @as(f32, @floatFromInt(int)) / float2 },
-                        else => null,
-                    };
-                } else if (std.mem.eql(u8, operator, "**")) {
-                    return switch (right) {
-                        .Integer => |int2| ast.LiteralValueType{ .Integer = std.math.pow(i32, int, int2) },
-                        .Float => |float2| ast.LiteralValueType{ .Float = std.math.pow(f32, @as(f32, @floatFromInt(int)), float2) },
-                        else => null,
-                    };
-                }
-            },
-            else => return null,
+    fn computeBinaryLiteralVal(left: ast.LiteralValueType, right: ast.LiteralValueType, op: []const u8) ?ast.LiteralValueType {
+        if (bu.strMatchesAny(op, &[2][]const u8{ "ra", "ya" })) {
+            return Interpreter.evalBinaryOpLogical(op, left, right);
+        } else if (bu.strMatchesAny(op, &[5][]const u8{ "+", "-", "/", "*", "**" })) {
+            return Interpreter.evalBinaryOpArith(op, left, right);
         }
         return null;
+    }
+
+    fn evalBinaryOpArith(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+        var val1: f32 = switch (left) {
+            .Integer => |int_val| @as(f32, @floatFromInt(int_val)),
+            .Float => |float_val| float_val,
+            else => 0, // arithmetic operator not supported for this type
+        };
+        var val2: f32 = switch (right) {
+            .Integer => |int_val| @as(f32, @floatFromInt(int_val)),
+            .Float => |float_val| float_val,
+            else => 0, // arithmetic operator not supported for this type
+        };
+        if (std.mem.eql(u8, operator, "+")) {
+            return ast.LiteralValueType{ .Float = val1 + val2 };
+        } else if (std.mem.eql(u8, operator, "-")) {
+            return ast.LiteralValueType{ .Float = val1 - val2 };
+        } else if (std.mem.eql(u8, operator, "/")) {
+            return ast.LiteralValueType{ .Float = val1 / val2 };
+        } else if (std.mem.eql(u8, operator, "*")) {
+            return ast.LiteralValueType{ .Float = val1 * val2 };
+        } else if (std.mem.eql(u8, operator, "**")) {
+            return ast.LiteralValueType{ .Float = std.math.pow(f32, val1, val2) };
+        }
+        return null;
+    }
+
+    fn evalBinaryOpLogical(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+        var expr_res1 = switch (left) {
+            .Boolean => |bool_val| bool_val,
+            .Integer => |int_val| int_val != 0,
+            else => false, // operator not supported for the given type
+        };
+        var expr_res2 = switch (right) {
+            .Boolean => |bool_val| bool_val,
+            .Integer => |int_val| int_val != 0,
+            else => false, // operator not supported for the given type
+        };
+        if (std.mem.eql(u8, operator, "ra")) {
+            return ast.LiteralValueType{ .Boolean = expr_res1 and expr_res2 };
+        } else if (std.mem.eql(u8, operator, "ya")) {
+            return ast.LiteralValueType{ .Boolean = expr_res1 or expr_res2 };
+        }
+        // unknown operator
+        return ast.LiteralValueType{ .Boolean = false };
     }
 };
 
 pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
-    const source: []const u8 = "rakha a ma 2 ** 2; dekhau a";
+    const source =
+        \\ rakha a ma sahi;
+        \\ yadi a ra galat suru
+        \\   rakha a ma 1;
+        \\ antya
+        \\ natra
+        \\   rakha a ma 0;
+        \\
+        \\ dekhau a;
+    ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     if (!ss.has_error) {
