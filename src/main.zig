@@ -23,8 +23,19 @@ const bu = @import("./utils//bishutil.zig");
 
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
-    var var_env: std.StringHashMap(ast.LiteralValueType) = std.StringHashMap(ast.LiteralValueType).init(std.heap.page_allocator);
+    var_env: std.StringHashMap(ast.LiteralValueType),
     const Self = @This();
+
+    pub fn init(stmts: std.ArrayList(ast.Stmt)) Self {
+        return Interpreter{
+            .stmts = stmts,
+            .var_env = std.StringHashMap(ast.LiteralValueType).init(std.heap.page_allocator),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.var_env.deinit();
+    }
 
     pub fn interpret(self: *Self) void {
         for (self.stmts.items) |stmt| {
@@ -80,7 +91,7 @@ pub const Interpreter = struct {
             .RakhaStmt => |rakha| {
                 var var_name = rakha.var_name;
                 if (self.evaluateExpr(rakha.expr)) |value| {
-                    var_env.put(var_name, value) catch |err| {
+                    self.var_env.put(var_name, value) catch |err| {
                         std.debug.print("{any}\n", .{err});
                     };
                 }
@@ -148,10 +159,9 @@ pub const Interpreter = struct {
     }
 
     fn evaluateVarExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
-        _ = self;
         switch (expr) {
             .VariableExpr => |var_expr| {
-                if (Interpreter.var_env.get(var_expr.var_name)) |value| {
+                if (self.var_env.get(var_expr.var_name)) |value| {
                     return value;
                 } else {
                     std.debug.print("'{s}' naam gareko variable tapaile pahile banaunu vayeko chhaina\n", .{var_expr.var_name});
@@ -169,20 +179,69 @@ pub const Interpreter = struct {
             return Interpreter.evalBinaryOpLogical(op, left, right);
         } else if (bu.strMatchesAny(op, &[5][]const u8{ "+", "-", "/", "*", "**" })) {
             return Interpreter.evalBinaryOpArith(op, left, right);
+        } else if (bu.strcmp(op, "barabar")) {
+            return Interpreter.evalBinaryOpEquality(left, right);
+        } else if (bu.strMatchesAny(op, &[2][]const u8{ "sano", "thulo" })) {
+            return Interpreter.evalBinaryOpComparision(op, left, right);
         }
         return null;
+    }
+
+    fn evalBinaryOpComparision(op: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+        var val1: f32 = switch (left) {
+            .Float => |float_val| float_val,
+            else => 0, // TODO: this is error, can'a apply comparision operator to types other than floats
+        };
+        var val2: f32 = switch (right) {
+            .Float => |float_val| float_val,
+            else => 0, // TODO: this is error, can'a apply comparision operator to types other than floats
+        };
+        if (bu.strcmp(op, "sano")) {
+            return ast.LiteralValueType{ .Boolean = val1 < val2 };
+        } else if (bu.strcmp(op, "thulo")) {
+            return ast.LiteralValueType{ .Boolean = val1 > val2 };
+        }
+        return null;
+    }
+
+    fn evalBinaryOpEquality(left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+        var bool_res: bool = false;
+        switch (left) {
+            .Float => |float_val| {
+                bool_res = switch (right) {
+                    .Float => |float_val2| float_val == float_val2,
+                    .Boolean => |bool_val| (float_val != 0) == bool_val,
+                    else => false,
+                };
+            },
+            .Boolean => |bool_val| {
+                bool_res = switch (right) {
+                    .Float => |float_val| bool_val == (float_val != 0),
+                    .Boolean => |bool_val2| bool_val == bool_val2,
+                    else => false,
+                };
+            },
+            .String => |str_val| {
+                bool_res = switch (right) {
+                    .String => |str_val2| bu.strcmp(str_val, str_val2),
+                    else => false,
+                };
+            },
+            else => {},
+        }
+        return ast.LiteralValueType{ .Boolean = bool_res };
     }
 
     fn evalBinaryOpArith(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
         var val1: f32 = switch (left) {
             .Integer => |int_val| @as(f32, @floatFromInt(int_val)),
             .Float => |float_val| float_val,
-            else => 0, // arithmetic operator not supported for this type
+            else => 0, // TODO: error: arithmetic operator not supported for this type
         };
         var val2: f32 = switch (right) {
             .Integer => |int_val| @as(f32, @floatFromInt(int_val)),
             .Float => |float_val| float_val,
-            else => 0, // arithmetic operator not supported for this type
+            else => 0, // TODO: error: arithmetic operator not supported for this type
         };
         if (std.mem.eql(u8, operator, "+")) {
             return ast.LiteralValueType{ .Float = val1 + val2 };
@@ -202,12 +261,12 @@ pub const Interpreter = struct {
         var expr_res1 = switch (left) {
             .Boolean => |bool_val| bool_val,
             .Integer => |int_val| int_val != 0,
-            else => false, // operator not supported for the given type
+            else => false, // TODO: error: operator not supported for the given type
         };
         var expr_res2 = switch (right) {
             .Boolean => |bool_val| bool_val,
             .Integer => |int_val| int_val != 0,
-            else => false, // operator not supported for the given type
+            else => false, // TODO: error: operator not supported for the given type
         };
         if (std.mem.eql(u8, operator, "ra")) {
             return ast.LiteralValueType{ .Boolean = expr_res1 and expr_res2 };
@@ -223,14 +282,13 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\ rakha a ma sahi;
-        \\ yadi a ra galat suru
-        \\   rakha a ma 1;
+        \\ rakha a ma 2 sano 3;
+        \\ yadi a suru 
+        \\    dekhau '3 bhanda sano 2';
         \\ antya
-        \\ natra
-        \\   rakha a ma 0;
-        \\
-        \\ dekhau a;
+        \\ natra suru 
+        \\    dekhau 'galat';
+        \\ antya
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
@@ -239,7 +297,8 @@ pub fn main() !void {
         defer parser.Parser.deinit();
         var stmts: std.ArrayList(ast.Stmt) = try p.parse();
         if (!parser.has_error) {
-            var int: Interpreter = Interpreter{ .stmts = stmts };
+            var int: Interpreter = Interpreter.init(stmts);
+            defer int.deinit();
             int.interpret();
         }
     }

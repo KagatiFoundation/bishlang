@@ -322,8 +322,22 @@ pub const Parser = struct {
 
     inline fn parseLogicalAnd(self: *Self) ParseResult {
         return self.tryParsingBinaryExpr(
-            self.parseAddition(),
+            self.parseEquality(),
             &[1]scanner.TokenType{scanner.TokenType.KW_RA},
+        );
+    }
+
+    inline fn parseEquality(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parseComparision(),
+            &[1]scanner.TokenType{scanner.TokenType.TOKEN_BARABAR},
+        );
+    }
+
+    inline fn parseComparision(self: *Self) ParseResult {
+        return self.tryParsingBinaryExpr(
+            self.parseAddition(),
+            &[2]scanner.TokenType{ scanner.TokenType.TOKEN_SANO, scanner.TokenType.TOKEN_THULO },
         );
     }
 
@@ -363,7 +377,7 @@ pub const Parser = struct {
                 }
                 if (ok) {
                     self.current += 1; // skip the binary operator
-                    var right_side_res: ParseResult = self.parseAddition();
+                    var right_side_res: ParseResult = self.parseLogicalOr();
                     return switch (right_side_res) {
                         .Success => |right_side_expr| ParseResult{
                             .Success = Parser.createBinaryExpr(
@@ -392,6 +406,10 @@ pub const Parser = struct {
         } else if (now.token_type == scanner.TokenType.TOKEN_INT) {
             return ParseResult{ .Success = Parser.createLiteralExpr(.{ .Integer = std.fmt.parseInt(i32, now.literal, 10) catch |err| {
                 std.debug.panic("error parsing int: {any}\n", .{err});
+            } }) };
+        } else if (now.token_type == scanner.TokenType.TOKEN_FLOAT) {
+            return ParseResult{ .Success = Parser.createLiteralExpr(.{ .Float = std.fmt.parseFloat(f32, now.literal) catch |err| {
+                std.debug.panic("error parsing float: {any}\n", .{err});
             } }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
             return ParseResult{ .Success = Parser.createLiteralExpr(.{ .String = now.literal }) };

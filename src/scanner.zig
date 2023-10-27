@@ -168,7 +168,7 @@ pub fn Scanner(comptime source: []const u8) type {
                 if (std.ascii.isDigit(char)) {
                     pos = self.parseInt(pos, line);
                     const literal = line[start..pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_INT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
+                    const token = Token{ .token_type = TokenType.TOKEN_FLOAT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
                     _ = try tokens.append(token);
                 } else if (char == '"' or char == '\'') {
                     var tmpPos = self.parseStr(pos, line);
