@@ -49,6 +49,45 @@ pub const Interpreter = struct {
             .RakhaStmt => |_| self.execRakhaStmt(stmt),
             .YadiNatraStmt => |_| self.execYadiNatraStmt(stmt),
             .BlockStmt => |_| self.execBlockStmt(stmt),
+            .GhumauStmt => |_| self.execGhumauStmt(stmt),
+            else => {},
+        }
+    }
+
+    fn execGhumauStmt(self: *Self, stmt: ast.Stmt) void {
+        switch (stmt) {
+            .GhumauStmt => |ghumau| {
+                var ghumau_expr_val: ?ast.LiteralValueType = self.evaluateExpr(ghumau.expr);
+                if (ghumau_expr_val) |value_type| {
+                    switch (value_type) {
+                        .Float => |num_val| {
+                            var create_var: bool = false;
+                            if (!std.mem.eql(u8, ghumau.identifier, "_")) {
+                                create_var = true;
+                            }
+                            for (0..@as(usize, @intFromFloat(num_val))) |_num| {
+                                if (create_var) {
+                                    var rakha_stmt: ast.Stmt = ast.Stmt{
+                                        .RakhaStmt = .{
+                                            .var_name = ghumau.identifier,
+                                            .expr = .{
+                                                .LiteralExpr = .{
+                                                    .value = ast.LiteralValueType{
+                                                        .Float = @floatFromInt(_num),
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    };
+                                    self.execStmt(rakha_stmt);
+                                }
+                                self.execStmt(ghumau.stmt.*);
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            },
             else => {},
         }
     }
@@ -117,10 +156,16 @@ pub const Interpreter = struct {
 
     fn dumpLiteralValueType(lit: ast.LiteralValueType) void {
         switch (lit) {
-            .Boolean => |boolVal| std.debug.print("{s}\n", .{if (boolVal) "sahi" else "galat"}),
-            .Integer => |intVal| std.debug.print("{d}\n", .{intVal}),
-            .String => |strVal| std.debug.print("{s}\n", .{strVal}),
-            else => {},
+            .Boolean => |bool_val| std.debug.print("{s}\n", .{if (bool_val) "sahi" else "galat"}),
+            .Integer => |int_val| std.debug.print("{d}\n", .{int_val}),
+            .String => |str_val| std.debug.print("{s}\n", .{str_val}),
+            .Float => |float_val| {
+                if (float_val == @trunc(float_val)) {
+                    std.debug.print("{d:.0}\n", .{float_val});
+                } else {
+                    std.debug.print("{d:.6}\n", .{float_val});
+                }
+            },
         }
     }
 
@@ -188,11 +233,11 @@ pub const Interpreter = struct {
     }
 
     fn evalBinaryOpComparision(op: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
-        var val1: f32 = switch (left) {
+        var val1: f64 = switch (left) {
             .Float => |float_val| float_val,
             else => 0, // TODO: this is error, can'a apply comparision operator to types other than floats
         };
-        var val2: f32 = switch (right) {
+        var val2: f64 = switch (right) {
             .Float => |float_val| float_val,
             else => 0, // TODO: this is error, can'a apply comparision operator to types other than floats
         };
@@ -232,14 +277,15 @@ pub const Interpreter = struct {
         return ast.LiteralValueType{ .Boolean = bool_res };
     }
 
+    // TODO: add support for string concatination
     fn evalBinaryOpArith(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
-        var val1: f32 = switch (left) {
-            .Integer => |int_val| @as(f32, @floatFromInt(int_val)),
+        var val1: f64 = switch (left) {
+            .Integer => |int_val| @as(f64, @floatFromInt(int_val)),
             .Float => |float_val| float_val,
             else => 0, // TODO: error: arithmetic operator not supported for this type
         };
-        var val2: f32 = switch (right) {
-            .Integer => |int_val| @as(f32, @floatFromInt(int_val)),
+        var val2: f64 = switch (right) {
+            .Integer => |int_val| @as(f64, @floatFromInt(int_val)),
             .Float => |float_val| float_val,
             else => 0, // TODO: error: arithmetic operator not supported for this type
         };
@@ -252,7 +298,7 @@ pub const Interpreter = struct {
         } else if (std.mem.eql(u8, operator, "*")) {
             return ast.LiteralValueType{ .Float = val1 * val2 };
         } else if (std.mem.eql(u8, operator, "**")) {
-            return ast.LiteralValueType{ .Float = std.math.pow(f32, val1, val2) };
+            return ast.LiteralValueType{ .Float = std.math.pow(f64, val1, val2) };
         }
         return null;
     }
@@ -282,12 +328,9 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\ rakha a ma 2 sano 3;
-        \\ yadi a suru 
-        \\    dekhau '3 bhanda sano 2';
-        \\ antya
-        \\ natra suru 
-        \\    dekhau 'galat';
+        \\ rakha number ma 15;
+        \\ ghumau number patak |num| suru
+        \\      dekhau num;
         \\ antya
     ;
     var ss = scanner.Scanner(source){};

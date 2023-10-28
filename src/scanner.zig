@@ -27,6 +27,7 @@ pub const TokenType = enum {
     TOKEN_SANO, // sano = "<"
     TOKEN_CHHAINA, // chhaina = "!"
     TOKEN_RAKHA, // rakha = "var" | "let" | "const"
+    KW_PATAK, //
     KW_YADI,
     KW_NATRA,
     KW_SURU,
@@ -34,6 +35,8 @@ pub const TokenType = enum {
     KW_JABASAMMA,
     KW_YA, // || operator
     KW_RA, // && operator
+    KW_CHHA, //
+    TOKEN_PIPE,
     TOKEN_ERROR,
     TOKEN_STRING,
     TOKEN_NONE,
@@ -71,6 +74,7 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("antya", TokenType.KW_ANTYA);
     _ = try KEYWORDS.put("ra", TokenType.KW_RA);
     _ = try KEYWORDS.put("ya", TokenType.KW_YA);
+    _ = try KEYWORDS.put("patak", TokenType.KW_PATAK);
     return true;
 }
 
@@ -210,6 +214,8 @@ pub fn Scanner(comptime source: []const u8) type {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_LEFT_PAREN, "(", start + 1));
                     } else if (char == ')') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, ")", start + 1));
+                    } else if (char == '|') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PIPE, "|", start + 1));
                     }
                     pos += 1;
                 }

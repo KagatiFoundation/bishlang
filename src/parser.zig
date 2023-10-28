@@ -107,6 +107,10 @@ pub const Parser = struct {
                 self.current += 1; // skip 'suru'
                 return self.parseBlockStmt();
             },
+            .TOKEN_GHUMAU => {
+                self.skip(); // skip 'ghumau'
+                return self.parseGhumauStmt();
+            },
             .TOKEN_EOF => {
                 self.current += 1;
                 return null;
@@ -153,6 +157,59 @@ pub const Parser = struct {
         has_error = true;
         self.hopToNextStmt();
         return null;
+    }
+
+    // <ghumau-statement> ::= GHUMAU <expression> PATAK [|<variable>|]  { <statement-list> }
+    fn parseGhumauStmt(self: *Self) ?ast.Stmt {
+        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
+        if (self.parseExpr()) |expr| {
+            if (!self.expectToken(scanner.TokenType.KW_PATAK, "patak")) {
+                self.hopToNextStmt();
+                return null;
+            }
+            self.skip(); // skip 'patak'
+            var now: scanner.Token = self.peek();
+            var var_expr_id: []const u8 = "_";
+            if (now.token_type == scanner.TokenType.TOKEN_PIPE) {
+                self.skip(); // skip starting '|'
+                var expr_tok: scanner.Token = self.peek();
+                if (self.parseExpr()) |ghumau_var_expr| {
+                    if (!self.expectToken(scanner.TokenType.TOKEN_PIPE, "|")) {
+                        self.hopToNextStmt();
+                        return null;
+                    }
+                    self.skip(); // skip ending '|'
+                    switch (ghumau_var_expr) {
+                        .VariableExpr => |var_expr| {
+                            var_expr_id = var_expr.var_name;
+                        },
+                        else => {
+                            errorutil.reportErrorFatal(expr_tok, "yaha variable ko naam lekhnus", "yeslai hataunu hos");
+                            return null;
+                        },
+                    }
+                }
+            }
+            if (self.parseStmt()) |stmt| {
+                var ghumau_body_stmt: *ast.Stmt = tmp_alloc.create(ast.Stmt) catch |err| {
+                    std.debug.panic("Error: {any}\n", .{err});
+                };
+                ghumau_body_stmt.* = stmt;
+                Parser.stmts_allocated.append(ghumau_body_stmt) catch |app_err| {
+                    std.debug.panic("Error: {any}\n", .{app_err});
+                };
+                return ast.Stmt{
+                    .GhumauStmt = .{
+                        .expr = expr,
+                        .identifier = var_expr_id,
+                        .stmt = ghumau_body_stmt,
+                    },
+                };
+            } else return null;
+        } else {
+            self.hopToNextStmt();
+            return null;
+        }
     }
 
     fn parseYadiStmt(self: *Self) ?ast.Stmt {
@@ -491,7 +548,7 @@ pub const Parser = struct {
         while (true) {
             var now: scanner.Token = self.peek();
             if (now.token_type != scanner.TokenType.TOKEN_NONE) {
-                var found: bool = now.token_type == scanner.TokenType.TOKEN_SEMICOLON;
+                var found: bool = now.token_type == scanner.TokenType.TOKEN_SEMICOLON or now.token_type == scanner.TokenType.KW_ANTYA;
                 if (found) {
                     self.current += 1; // skip the ';'
                     break;
@@ -552,6 +609,10 @@ pub const Parser = struct {
             .literal = "",
             .lexeme = "",
         };
+    }
+
+    fn skip(self: *Self) void {
+        self.current += 1;
     }
 
     fn isAtEnd(self: *Self) bool {

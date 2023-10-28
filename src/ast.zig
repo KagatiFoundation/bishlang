@@ -19,7 +19,7 @@ const std = @import("std");
 
 pub const LiteralValueType = union(enum) {
     Integer: i32,
-    Float: f32,
+    Float: f64,
     String: []const u8,
     Boolean: bool,
 };
@@ -66,5 +66,16 @@ pub const Stmt = union(enum) {
 
     BlockStmt: struct {
         stmts: std.ArrayList(*Stmt),
+    },
+
+    // <ghumau-statement> ::= GHUMAU <expression> PATAK [|<variable>|]  { <statement-list> }
+    GhumauStmt: struct {
+        // if expr is 'true', loop only once, if it 'false', do not loop at all
+        // else if expr is 'string', loop over every character of the string
+        //      and store it in 'identifier'
+        // else if expr is 'int' loop that 'int' times
+        expr: Expr,
+        identifier: []const u8,
+        stmt: *Stmt,
     },
 };

@@ -10,7 +10,7 @@ Keywords = YADI, NATRA, DEKHAU, GHUMAU, PATAK, RAKHA, MA, BARABAR, CHHAINA,
 
 <yadi-statement> ::= YADI <boolean> { <statement-list> } [NATRA { <statement-list> }]
 
-<ghumau-statement> ::= GHUMAU [<number> PATAK] { <statement-list> } 
+<ghumau-statement> ::= GHUMAU <expression> PATAK [|<variable>|]  { <statement-list> } 
 
 <jabasamma-statement> ::= JABASAMMA <boolean> { <statement-list> }
 

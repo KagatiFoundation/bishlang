@@ -84,3 +84,8 @@ fn printStrNTimes(char: []const u8, count: usize) void {
         std.debug.print("{s}", .{char});
     }
 }
+
+fn reportErronousExpr(start: scanner.Token, end: scanner.Token) void {
+    _ = end;
+    _ = start;
+}
