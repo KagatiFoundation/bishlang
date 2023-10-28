@@ -59,37 +59,50 @@ pub const Interpreter = struct {
             .GhumauStmt => |ghumau| {
                 var ghumau_expr_val: ?ast.LiteralValueType = self.evaluateExpr(ghumau.expr);
                 if (ghumau_expr_val) |value_type| {
+                    var create_var: bool = false;
+                    if (!std.mem.eql(u8, ghumau.identifier, "_")) create_var = true; // '_' is ignored
                     switch (value_type) {
                         .Float => |num_val| {
-                            var create_var: bool = false;
-                            if (!std.mem.eql(u8, ghumau.identifier, "_")) {
-                                create_var = true;
-                            }
                             for (0..@as(usize, @intFromFloat(num_val))) |_num| {
                                 if (create_var) {
-                                    var rakha_stmt: ast.Stmt = ast.Stmt{
-                                        .RakhaStmt = .{
-                                            .var_name = ghumau.identifier,
-                                            .expr = .{
-                                                .LiteralExpr = .{
-                                                    .value = ast.LiteralValueType{
-                                                        .Float = @floatFromInt(_num),
-                                                    },
-                                                },
-                                            },
+                                    self.execStmt(Interpreter._createRakhaStmt(
+                                        ghumau.identifier,
+                                        .{
+                                            .LiteralExpr = .{ .value = ast.LiteralValueType{ .Float = @floatFromInt(_num) } },
                                         },
-                                    };
-                                    self.execStmt(rakha_stmt);
+                                    ));
                                 }
                                 self.execStmt(ghumau.stmt.*);
                             }
                         },
-                        else => {},
+                        .String => |str_val| {
+                            for (str_val) |char| {
+                                if (create_var) {
+                                    self.execStmt(Interpreter._createRakhaStmt(
+                                        ghumau.identifier,
+                                        .{
+                                            .LiteralExpr = .{ .value = ast.LiteralValueType{ .String = &[1]u8{char} } },
+                                        },
+                                    ));
+                                }
+                                self.execStmt(ghumau.stmt.*);
+                            }
+                        },
+                        else => {}, // 'ghumau' statement not supported for this type
                     }
                 }
             },
             else => {},
         }
+    }
+
+    fn _createRakhaStmt(var_name: []const u8, expr: ast.Expr) ast.Stmt {
+        return ast.Stmt{
+            .RakhaStmt = .{
+                .expr = expr,
+                .var_name = var_name,
+            },
+        };
     }
 
     fn execBlockStmt(self: *Self, stmt: ast.Stmt) void {
@@ -328,10 +341,13 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\ rakha number ma 15;
-        \\ ghumau number patak |num| suru
-        \\      dekhau num;
+        \\ rakha str_len ma 0;
+        \\ rakha name ma "ramesh poudel";
+        \\ ghumau name patak |_| suru
+        \\      rakha str_len ma str_len + 1;
         \\ antya
+        \\ 
+        \\ dekhau str_len;
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
