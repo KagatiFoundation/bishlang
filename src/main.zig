@@ -19,7 +19,7 @@ const std = @import("std");
 const scanner = @import("./scanner.zig");
 const parser = @import("./parser.zig");
 const ast = @import("./ast.zig");
-const bu = @import("./utils//bishutil.zig");
+const bu = @import("./utils/bishutil.zig");
 
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
@@ -188,7 +188,25 @@ pub const Interpreter = struct {
             .VariableExpr => |_| self.evaluateVarExpr(expr),
             .BinaryExpr => |_| self.evaluateBinaryExpr(expr),
             .GroupExpr => |_| self.evaluateGroupExpr(expr),
+            .UnaryExpr => |_| self.evaluateUnaryExpr(expr),
         };
+    }
+
+    fn evaluateUnaryExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+        switch (expr) {
+            .UnaryExpr => |unary| {
+                if (self.evaluateExpr(unary.expr.*)) |evaluated| {
+                    if (bu.strcmp(unary.operator, "chhaina")) {
+                        switch (evaluated) {
+                            .Boolean => |bool_val| return ast.LiteralValueType{ .Boolean = !bool_val },
+                            .Float => |float_val| return ast.LiteralValueType{ .Float = if (float_val != 0) 0 else 1 },
+                            else => return evaluated, // operator not supported for the given type
+                        }
+                    } else return evaluated;
+                } else return null;
+            },
+            else => return null,
+        }
     }
 
     fn evaluateGroupExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
@@ -248,11 +266,11 @@ pub const Interpreter = struct {
     fn evalBinaryOpComparision(op: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
         var val1: f64 = switch (left) {
             .Float => |float_val| float_val,
-            else => 0, // TODO: this is error, can'a apply comparision operator to types other than floats
+            else => 0, // TODO: error: can'a apply comparision operator to types other than floats
         };
         var val2: f64 = switch (right) {
             .Float => |float_val| float_val,
-            else => 0, // TODO: this is error, can'a apply comparision operator to types other than floats
+            else => 0, // TODO: error: can'a apply comparision operator to types other than floats
         };
         if (bu.strcmp(op, "sano")) {
             return ast.LiteralValueType{ .Boolean = val1 < val2 };
@@ -310,6 +328,14 @@ pub const Interpreter = struct {
             return ast.LiteralValueType{ .Float = val1 / val2 };
         } else if (std.mem.eql(u8, operator, "*")) {
             return ast.LiteralValueType{ .Float = val1 * val2 };
+        } else if (std.mem.eql(u8, operator, "%")) {
+            if (@trunc(val1) == val1) {
+                if (@trunc(val2) == val2) {
+                    return ast.LiteralValueType{ .Float = @rem(val1, val2) };
+                }
+            }
+            // TODO: error: '%' not supported for the given types
+            return null;
         } else if (std.mem.eql(u8, operator, "**")) {
             return ast.LiteralValueType{ .Float = std.math.pow(f64, val1, val2) };
         }
@@ -341,13 +367,7 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\ rakha str_len ma 0;
-        \\ rakha name ma "ramesh poudel";
-        \\ ghumau name patak |_| suru
-        \\      rakha str_len ma str_len + 1;
-        \\ antya
-        \\ 
-        \\ dekhau str_len;
+        \\ dekhau "socket";
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
@@ -355,7 +375,7 @@ pub fn main() !void {
         var p: parser.Parser = parser.Parser.init(source, tokens);
         defer parser.Parser.deinit();
         var stmts: std.ArrayList(ast.Stmt) = try p.parse();
-        if (!parser.has_error) {
+        if (!p.has_error) {
             var int: Interpreter = Interpreter.init(stmts);
             defer int.deinit();
             int.interpret();

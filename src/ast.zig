@@ -42,6 +42,11 @@ pub const Expr = union(enum) {
     GroupExpr: struct {
         expr: *Expr,
     },
+
+    UnaryExpr: struct {
+        operator: []const u8,
+        expr: *Expr,
+    },
 };
 
 pub const Stmt = union(enum) {

@@ -48,6 +48,7 @@ pub const TokenType = enum {
     TOKEN_STAR,
     TOKEN_SLASH,
     TOKEN_MINUS,
+    TOKEN_PERCENTAGE,
     TOKEN_LEFT_PAREN,
     TOKEN_RIGHT_PAREN,
     TOKEN_GALAT, // galat = "false"
@@ -64,6 +65,7 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("sano", TokenType.TOKEN_SANO);
     _ = try KEYWORDS.put("thulo", TokenType.TOKEN_THULO);
     _ = try KEYWORDS.put("chhaina", TokenType.TOKEN_CHHAINA);
+    _ = try KEYWORDS.put("chha", TokenType.KW_CHHA);
     _ = try KEYWORDS.put("rakha", TokenType.TOKEN_RAKHA);
     _ = try KEYWORDS.put("barabar", TokenType.TOKEN_BARABAR);
     _ = try KEYWORDS.put("galat", TokenType.TOKEN_GALAT);
@@ -216,6 +218,8 @@ pub fn Scanner(comptime source: []const u8) type {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, ")", start + 1));
                     } else if (char == '|') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PIPE, "|", start + 1));
+                    } else if (char == '%') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PERCENTAGE, "%", start + 1));
                     }
                     pos += 1;
                 }
