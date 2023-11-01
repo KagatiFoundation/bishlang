@@ -21,20 +21,30 @@ const parser = @import("./parser.zig");
 const ast = @import("./ast.zig");
 const bu = @import("./utils/bishutil.zig");
 
+// const InterpretResult = union(enum) {
+// Success,
+// Return: ast.LiteralValueType,
+// Break,
+// Continue,
+// };
+
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
     var_env: std.StringHashMap(ast.LiteralValueType),
+    func_decls: std.StringHashMap(ast.Stmt),
     const Self = @This();
 
     pub fn init(stmts: std.ArrayList(ast.Stmt)) Self {
         return Interpreter{
             .stmts = stmts,
             .var_env = std.StringHashMap(ast.LiteralValueType).init(std.heap.page_allocator),
+            .func_decls = std.StringHashMap(ast.Stmt).init(std.heap.page_allocator),
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.var_env.deinit();
+        self.func_decls.deinit();
     }
 
     pub fn interpret(self: *Self) void {
@@ -50,6 +60,30 @@ pub const Interpreter = struct {
             .YadiNatraStmt => |_| self.execYadiNatraStmt(stmt),
             .BlockStmt => |_| self.execBlockStmt(stmt),
             .GhumauStmt => |_| self.execGhumauStmt(stmt),
+            .KaryaDeclStmt => |_| self.execKaryaDeclStmt(stmt),
+            .ExprStmt => |_| self.execExprStmt(stmt),
+            // else => {},
+        }
+    }
+
+    fn execExprStmt(self: *Self, stmt: ast.Stmt) void {
+        switch (stmt) {
+            .ExprStmt => |expr_stmt| {
+                _ = self.evaluateExpr(expr_stmt.expr);
+            },
+            else => {},
+        }
+    }
+
+    fn execKaryaDeclStmt(self: *Self, stmt: ast.Stmt) void {
+        switch (stmt) {
+            .KaryaDeclStmt => |karya| {
+                var karya_name: []const u8 = karya.name;
+                var karya_body: *ast.Stmt = karya.stmt;
+                self.func_decls.put(karya_name, karya_body.*) catch |err| {
+                    std.debug.panic("Error putting value on func_decls: {any}\n", .{err});
+                };
+            },
             else => {},
         }
     }
@@ -122,7 +156,8 @@ pub const Interpreter = struct {
                 if (self.evaluateExpr(yadi_natra.condition)) |eval_res| {
                     var condition: bool = switch (eval_res) {
                         .Boolean => |bool_val| bool_val,
-                        .Integer => |int_val| int_val != 0,
+                        .Float => |int_val| int_val != 0,
+                        .String => |str_val| !bu.strcmp(str_val, ""),
                         else => false,
                     };
                     if (condition) {
@@ -141,7 +176,7 @@ pub const Interpreter = struct {
     fn execRakhaStmt(self: *Self, stmt: ast.Stmt) void {
         switch (stmt) {
             .RakhaStmt => |rakha| {
-                var var_name = rakha.var_name;
+                var var_name: []const u8 = rakha.var_name;
                 if (self.evaluateExpr(rakha.expr)) |value| {
                     self.var_env.put(var_name, value) catch |err| {
                         std.debug.print("{any}\n", .{err});
@@ -179,6 +214,7 @@ pub const Interpreter = struct {
                     std.debug.print("{d:.6}\n", .{float_val});
                 }
             },
+            .Null => std.debug.print("nil", .{}),
         }
     }
 
@@ -189,7 +225,21 @@ pub const Interpreter = struct {
             .BinaryExpr => |_| self.evaluateBinaryExpr(expr),
             .GroupExpr => |_| self.evaluateGroupExpr(expr),
             .UnaryExpr => |_| self.evaluateUnaryExpr(expr),
+            .CallExpr => |_| self.evaluateCallExpr(expr),
         };
+    }
+
+    fn evaluateCallExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+        switch (expr) {
+            .CallExpr => |karya| {
+                var karya_name: []const u8 = karya.name;
+                if (self.func_decls.get(karya_name)) |body| {
+                    self.execStmt(body);
+                }
+                return ast.LiteralValueType{ .Null = true };
+            },
+            else => return null,
+        }
     }
 
     fn evaluateUnaryExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
@@ -367,7 +417,12 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\ dekhau "socket";
+        \\  karya printer() suru 
+        \\      ghumau 10 patak |num| suru
+        \\          dekhau num;
+        \\      antya
+        \\  antya
+        \\  printer();
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();

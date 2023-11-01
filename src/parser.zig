@@ -111,6 +111,10 @@ pub const Parser = struct {
                 self.skip(); // skip 'ghumau'
                 return self.parseGhumauStmt();
             },
+            .KW_KARYA => {
+                self.skip(); // skip 'karya'
+                return self.parseKaryaDeclStmt();
+            },
             .TOKEN_EOF => {
                 self.current += 1;
                 return null;
@@ -120,13 +124,14 @@ pub const Parser = struct {
     }
 
     fn parseExprStmt(self: *Self) ?ast.Stmt {
-        var possible_expr_tokens: [6]scanner.TokenType = [6]scanner.TokenType{
+        var possible_expr_tokens: [7]scanner.TokenType = [7]scanner.TokenType{
             scanner.TokenType.TOKEN_IDENTIFIER,
             scanner.TokenType.TOKEN_INT,
             scanner.TokenType.TOKEN_STRING,
             scanner.TokenType.TOKEN_SAHI,
             scanner.TokenType.TOKEN_GALAT,
             scanner.TokenType.TOKEN_FLOAT,
+            scanner.TokenType.TOKEN_LEFT_PAREN,
         };
         var ok: bool = false;
         var now: scanner.Token = self.peek();
@@ -155,6 +160,45 @@ pub const Parser = struct {
             arena.free(msg);
         }
         self.has_error = true;
+        self.hopToNextStmt();
+        return null;
+    }
+
+    fn parseKaryaDeclStmt(self: *Self) ?ast.Stmt {
+        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
+        var name_token: scanner.Token = self.peek();
+        if (name_token.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
+            self.skip(); // skip karya name
+            if (!self.expectToken(scanner.TokenType.TOKEN_LEFT_PAREN, "(")) {
+                self.has_error = true;
+                self.hopToNextStmt();
+                return null;
+            }
+            // parse parameter list here
+            self.skip(); // skip '('
+            if (!self.expectToken(scanner.TokenType.TOKEN_RIGHT_PAREN, ")")) {
+                self.has_error = true;
+                self.hopToNextStmt();
+                return null;
+            }
+            self.skip(); // skip ')'
+            if (self.parseStmt()) |stmt| {
+                var karya_body_stmt: *ast.Stmt = tmp_alloc.create(ast.Stmt) catch |err| {
+                    std.debug.panic("Error: {any}\n", .{err});
+                };
+                karya_body_stmt.* = stmt;
+                Parser.stmts_allocated.append(karya_body_stmt) catch |app_err| {
+                    std.debug.panic("Error: {any}\n", .{app_err});
+                };
+                return ast.Stmt{
+                    .KaryaDeclStmt = .{
+                        .name = name_token.lexeme,
+                        .stmt = karya_body_stmt,
+                        .params = &[0][]const u8{},
+                    },
+                };
+            } else return null;
+        }
         self.hopToNextStmt();
         return null;
     }
@@ -434,7 +478,7 @@ pub const Parser = struct {
 
     inline fn parsePower(self: *Self) ParseResult {
         return self.tryParsingBinaryExpr(
-            self.parsePrimary(),
+            self.parseCallExpr(),
             &[1]scanner.TokenType{scanner.TokenType.TOKEN_POWER},
         );
     }
@@ -473,6 +517,39 @@ pub const Parser = struct {
         }
     }
 
+    fn parseCallExpr(self: *Self) ParseResult {
+        var possible_call_expr_token: scanner.Token = self.peek();
+        var prim_parse_res: ParseResult = self.parsePrimary();
+        switch (prim_parse_res) {
+            .Success => |prim_expr| {
+                if (self.peek().token_type == scanner.TokenType.TOKEN_LEFT_PAREN) {
+                    self.skip(); // skip '('
+                    if (!self.expectToken(scanner.TokenType.TOKEN_RIGHT_PAREN, ")")) {
+                        var now: scanner.Token = self.peek();
+                        self.hopToNextStmt();
+                        return Parser.unexpectedTokenErr(now);
+                    }
+                    self.skip(); // skip ')'
+                    switch (prim_expr) {
+                        .VariableExpr => |var_expr| {
+                            return ParseResult{ .Success = .{
+                                .CallExpr = .{
+                                    .name = var_expr.var_name,
+                                },
+                            } };
+                        },
+                        else => {
+                            self.hopToNextStmt();
+                            return Parser.unexpectedTokenErr(possible_call_expr_token);
+                        },
+                    }
+                }
+            },
+            else => {},
+        }
+        return prim_parse_res;
+    }
+
     fn parsePrimary(self: *Self) ParseResult {
         var now: scanner.Token = self.peek();
         self.current += 1;
@@ -494,7 +571,7 @@ pub const Parser = struct {
             return ParseResult{ .Success = .{ .VariableExpr = .{ .var_name = now.lexeme } } };
         } else if (now.token_type == scanner.TokenType.TOKEN_LEFT_PAREN) {
             var left_paren: scanner.Token = now;
-            self.current += 1; // skip '('
+            // self.skip(); // skip '('
             var group_expr_res = self.parseLogicalOr();
             switch (group_expr_res) {
                 .Success => |group_expr| {
@@ -506,7 +583,7 @@ pub const Parser = struct {
                             },
                         };
                     }
-                    // self.skip();
+                    self.skip(); // skip ')'
                     return ParseResult{ .Success = Parser.createGroupExpr(group_expr) };
                 },
                 .Error => |_| return Parser.unexpectedTokenErr(self.peek()),

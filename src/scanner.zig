@@ -36,6 +36,11 @@ pub const TokenType = enum {
     KW_YA, // || operator
     KW_RA, // && operator
     KW_CHHA, //
+    KW_KARYA, // keyword to declare function
+    KW_GARA, // keyword to call a function
+    TOKEN_COMMA, // ,
+    KW_FARKAU, // 'return' in other mainstream languages
+    KW_NIL, // 'null'
     TOKEN_PIPE,
     TOKEN_ERROR,
     TOKEN_STRING,
@@ -77,6 +82,9 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("ra", TokenType.KW_RA);
     _ = try KEYWORDS.put("ya", TokenType.KW_YA);
     _ = try KEYWORDS.put("patak", TokenType.KW_PATAK);
+    _ = try KEYWORDS.put("karya", TokenType.KW_KARYA);
+    _ = try KEYWORDS.put("gara", TokenType.KW_GARA);
+    _ = try KEYWORDS.put("farkau", TokenType.KW_FARKAU);
     return true;
 }
 
@@ -220,6 +228,8 @@ pub fn Scanner(comptime source: []const u8) type {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PIPE, "|", start + 1));
                     } else if (char == '%') {
                         _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PERCENTAGE, "%", start + 1));
+                    } else if (char == ',') {
+                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_COMMA, ",", start + 1));
                     }
                     pos += 1;
                 }

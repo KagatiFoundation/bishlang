@@ -6,17 +6,23 @@ Keywords = YADI, NATRA, DEKHAU, GHUMAU, PATAK, RAKHA, MA, BARABAR, CHHAINA,
 <statement-list> ::= <statement> | <statement> <statement-list>
 
 <statement> ::= <yadi-statement> | <dekhau-statement> | <ghumau-statement> | 
-                <jabasamma-statement> | <rakha-statement>
+                <jabasamma-statement> | <rakha-statement> | <group-statement> | <karya-statement>
 
-<yadi-statement> ::= YADI <boolean> { <statement-list> } [NATRA { <statement-list> }]
+<block-statement> ::= SURU <statement-list> ANTYA
 
-<ghumau-statement> ::= GHUMAU <expression> PATAK [|<variable>|]  { <statement-list> } 
+<karya-statement> ::= KARYA <variable>([<parameter-list>]) <statement>
 
-<jabasamma-statement> ::= JABASAMMA <boolean> { <statement-list> }
+<yadi-statement> ::= YADI <boolean> <statement> [NATRA <statement>]
+
+<ghumau-statement> ::= GHUMAU <expression> PATAK [|<variable>|] <statement>
+
+<jabasamma-statement> ::= JABASAMMA <boolean> <statement>
 
 <rakha-statement> ::= RAKHA <variable> MA <expression>;
 
 <dekhau-statement> ::= DEKHAU <expression>;
+
+<parameter-list> ::= <variable> | <variable> , <parameter-list>
 
 <variable> ::= [a-z-A-Z]+[a-zA-Z0-9_]*?
 

@@ -22,6 +22,7 @@ pub const LiteralValueType = union(enum) {
     Float: f64,
     String: []const u8,
     Boolean: bool,
+    Null: bool,
 };
 
 pub const Expr = union(enum) {
@@ -46,6 +47,10 @@ pub const Expr = union(enum) {
     UnaryExpr: struct {
         operator: []const u8,
         expr: *Expr,
+    },
+
+    CallExpr: struct {
+        name: []const u8,
     },
 };
 
@@ -81,6 +86,13 @@ pub const Stmt = union(enum) {
         // else if expr is 'int' loop that 'int' times
         expr: Expr,
         identifier: []const u8,
+        stmt: *Stmt,
+    },
+
+    // <karya-statement> ::= KARYA <variable>([<parameter-list>]) <block-statement>
+    KaryaDeclStmt: struct {
+        name: []const u8,
+        params: []const []const u8,
         stmt: *Stmt,
     },
 };
