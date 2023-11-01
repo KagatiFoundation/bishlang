@@ -20,6 +20,7 @@ const scanner = @import("./scanner.zig");
 const parser = @import("./parser.zig");
 const ast = @import("./ast.zig");
 const bu = @import("./utils/bishutil.zig");
+const scope = @import("./scope.zig");
 
 const InterpretResult = union(enum) {
     Success,
@@ -30,26 +31,26 @@ const InterpretResult = union(enum) {
 
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
-    var_env: std.StringHashMap(ast.LiteralValueType),
-    func_decls: std.StringHashMap(ast.Stmt),
+    _internal_scope: scope.Scope,
     const Self = @This();
 
     pub fn init(stmts: std.ArrayList(ast.Stmt)) Self {
         return Interpreter{
             .stmts = stmts,
-            .var_env = std.StringHashMap(ast.LiteralValueType).init(std.heap.page_allocator),
-            .func_decls = std.StringHashMap(ast.Stmt).init(std.heap.page_allocator),
+            ._internal_scope = scope.Scope.init(),
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.var_env.deinit();
-        self.func_decls.deinit();
+        self._internal_scope.deinit();
     }
 
     pub fn interpret(self: *Self) void {
         for (self.stmts.items) |stmt| {
-            _ = self.execStmt(stmt);
+            switch (self.execStmt(stmt)) {
+                .Return => break,
+                else => continue,
+            }
         }
     }
 
@@ -93,7 +94,7 @@ pub const Interpreter = struct {
             .KaryaDeclStmt => |karya| {
                 var karya_name: []const u8 = karya.name;
                 var karya_body: *ast.Stmt = karya.stmt;
-                self.func_decls.put(karya_name, karya_body.*) catch |err| {
+                self._internal_scope.func_decls.put(karya_name, karya_body.*) catch |err| {
                     std.debug.panic("Error putting value on func_decls: {any}\n", .{err});
                 };
             },
@@ -143,7 +144,7 @@ pub const Interpreter = struct {
                             }
                         }
                     },
-                    else => {}, // 'ghumau' statement not supported for this type
+                    else => {}, // TODO: error: 'ghumau' statement not supported for this type
                 }
             },
             else => {},
@@ -163,13 +164,22 @@ pub const Interpreter = struct {
     fn execBlockStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .BlockStmt => |block| {
+                var current_scope: scope.Scope = self._internal_scope;
+                var new_scope: scope.Scope = current_scope.copy();
+                self._internal_scope = new_scope;
                 for (block.stmts.items) |_stmt| {
                     var result: InterpretResult = self.execStmt(_stmt.*);
                     switch (result) {
                         .Success => continue,
-                        else => return result,
+                        else => {
+                            new_scope.deinit();
+                            self._internal_scope = current_scope;
+                            return result;
+                        },
                     }
                 }
+                new_scope.deinit();
+                self._internal_scope = current_scope;
             },
             else => {},
         }
@@ -189,7 +199,7 @@ pub const Interpreter = struct {
                     return self.execStmt(yadi_natra.yadi_sahi.*);
                 } else {
                     if (@intFromPtr(yadi_natra.yadi_galat) != 0xAAAAAAAAAAAAAAAA) { // 0xAAAAAAAAAAAAAAAA = undefined
-                        return self.execStmt(yadi_natra.yadi_sahi.*);
+                        return self.execStmt(yadi_natra.yadi_galat.*.?);
                     }
                 }
             },
@@ -202,7 +212,7 @@ pub const Interpreter = struct {
         switch (stmt) {
             .RakhaStmt => |rakha| {
                 var var_name: []const u8 = rakha.var_name;
-                self.var_env.put(var_name, self.evaluateExpr(rakha.expr)) catch |err| {
+                self._internal_scope.var_env.put(var_name, self.evaluateExpr(rakha.expr)) catch |err| {
                     std.debug.print("{any}\n", .{err});
                 };
             },
@@ -254,7 +264,7 @@ pub const Interpreter = struct {
         switch (expr) {
             .CallExpr => |karya| {
                 var karya_name: []const u8 = karya.name;
-                if (self.func_decls.get(karya_name)) |body| {
+                if (self._internal_scope.func_decls.get(karya_name)) |body| {
                     return switch (self.execStmt(body)) {
                         .Return => |lit_val| lit_val,
                         else => .Null,
@@ -275,7 +285,7 @@ pub const Interpreter = struct {
                     switch (evaluated) {
                         .Boolean => |bool_val| return ast.LiteralValueType{ .Boolean = !bool_val },
                         .Float => |float_val| return ast.LiteralValueType{ .Float = if (float_val != 0) 0 else 1 },
-                        else => return evaluated, // operator not supported for the given type
+                        else => return evaluated, // TODO: error: operator not supported for the given type
                     }
                 } else return evaluated;
             },
@@ -304,7 +314,7 @@ pub const Interpreter = struct {
     fn evaluateVarExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         switch (expr) {
             .VariableExpr => |var_expr| {
-                if (self.var_env.get(var_expr.var_name)) |value| {
+                if (self._internal_scope.var_env.get(var_expr.var_name)) |value| {
                     return value;
                 } else {
                     std.debug.print("'{s}' naam gareko variable tapaile pahile banaunu vayeko chhaina\n", .{var_expr.var_name});
@@ -434,13 +444,16 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
+        \\  rakha a ma 100;
         \\  karya max_of_2_and_3() suru 
-        \\      rakha a ma 3;
-        \\      rakha b ma 4;
+        \\      rakha b ma 5;
         \\      yadi a thulo b farkau a;
         \\      natra farkau b;
         \\  antya
         \\  dekhau max_of_2_and_3();
+        \\  dekhau a;
+        \\  rakha cc ma 444;
+        \\  dekhau cc;
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
