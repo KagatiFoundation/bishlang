@@ -22,7 +22,7 @@ pub const LiteralValueType = union(enum) {
     Float: f64,
     String: []const u8,
     Boolean: bool,
-    Null: bool,
+    Null,
 };
 
 pub const Expr = union(enum) {
@@ -94,5 +94,9 @@ pub const Stmt = union(enum) {
         name: []const u8,
         params: []const []const u8,
         stmt: *Stmt,
+    },
+
+    FarkauStmt: struct {
+        expr: ?Expr,
     },
 };

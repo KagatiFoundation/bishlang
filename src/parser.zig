@@ -115,6 +115,10 @@ pub const Parser = struct {
                 self.skip(); // skip 'karya'
                 return self.parseKaryaDeclStmt();
             },
+            .KW_FARKAU => {
+                self.skip(); // skip 'farkau'
+                return self.parseFarkauStmt();
+            },
             .TOKEN_EOF => {
                 self.current += 1;
                 return null;
@@ -162,6 +166,26 @@ pub const Parser = struct {
         self.has_error = true;
         self.hopToNextStmt();
         return null;
+    }
+
+    fn parseFarkauStmt(self: *Self) ?ast.Stmt {
+        var now: scanner.Token = self.peek();
+        if (now.token_type != scanner.TokenType.TOKEN_SEMICOLON) {
+            if (self.parseExpr()) |expr| {
+                if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
+                    self.has_error = true;
+                    self.hopToNextStmt();
+                    return null;
+                }
+                self.skip(); // skip ';'
+                return ast.Stmt{ .FarkauStmt = .{ .expr = expr } };
+            }
+            self.hopToNextStmt();
+            return null;
+        } else {
+            self.skip(); // skip ';'
+            return ast.Stmt{ .FarkauStmt = .{ .expr = null } };
+        }
     }
 
     fn parseKaryaDeclStmt(self: *Self) ?ast.Stmt {

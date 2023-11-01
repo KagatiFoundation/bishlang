@@ -1,12 +1,13 @@
 Keywords = YADI, NATRA, DEKHAU, GHUMAU, PATAK, RAKHA, MA, BARABAR, CHHAINA, 
-            SANO, THULO, JABASAMMA, SAHI, GALAT
+            SANO, THULO, JABASAMMA, SAHI, GALAT, FARKAU
 
 <program> ::= <statement-list>
 
 <statement-list> ::= <statement> | <statement> <statement-list>
 
 <statement> ::= <yadi-statement> | <dekhau-statement> | <ghumau-statement> | 
-                <jabasamma-statement> | <rakha-statement> | <group-statement> | <karya-statement>
+                <jabasamma-statement> | <rakha-statement> | <group-statement> | 
+                <karya-statement> | <farkau-statement>
 
 <block-statement> ::= SURU <statement-list> ANTYA
 
@@ -21,6 +22,8 @@ Keywords = YADI, NATRA, DEKHAU, GHUMAU, PATAK, RAKHA, MA, BARABAR, CHHAINA,
 <rakha-statement> ::= RAKHA <variable> MA <expression>;
 
 <dekhau-statement> ::= DEKHAU <expression>;
+
+<farkau-statement> ::= FARKAU [<expression>];
 
 <parameter-list> ::= <variable> | <variable> , <parameter-list>
 

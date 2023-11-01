@@ -21,12 +21,12 @@ const parser = @import("./parser.zig");
 const ast = @import("./ast.zig");
 const bu = @import("./utils/bishutil.zig");
 
-// const InterpretResult = union(enum) {
-// Success,
-// Return: ast.LiteralValueType,
-// Break,
-// Continue,
-// };
+const InterpretResult = union(enum) {
+    Success,
+    Return: ast.LiteralValueType,
+    Break,
+    Continue,
+};
 
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
@@ -49,33 +49,46 @@ pub const Interpreter = struct {
 
     pub fn interpret(self: *Self) void {
         for (self.stmts.items) |stmt| {
-            self.execStmt(stmt);
+            _ = self.execStmt(stmt);
         }
     }
 
-    fn execStmt(self: *Self, stmt: ast.Stmt) void {
-        switch (stmt) {
+    fn execStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
+        return switch (stmt) {
             .DekhauStmt => |_| self.execDekhauStmt(stmt),
             .RakhaStmt => |_| self.execRakhaStmt(stmt),
             .YadiNatraStmt => |_| self.execYadiNatraStmt(stmt),
             .BlockStmt => |_| self.execBlockStmt(stmt),
             .GhumauStmt => |_| self.execGhumauStmt(stmt),
             .KaryaDeclStmt => |_| self.execKaryaDeclStmt(stmt),
-            .ExprStmt => |_| self.execExprStmt(stmt),
-            // else => {},
-        }
+            .ExprStmt => |_| self.execExprStmt(stmt), // expression statement values are ignored
+            .FarkauStmt => |_| self.execFarkauStmt(stmt),
+        };
     }
 
-    fn execExprStmt(self: *Self, stmt: ast.Stmt) void {
+    fn execExprStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .ExprStmt => |expr_stmt| {
                 _ = self.evaluateExpr(expr_stmt.expr);
             },
             else => {},
         }
+        return .Success;
     }
 
-    fn execKaryaDeclStmt(self: *Self, stmt: ast.Stmt) void {
+    fn execFarkauStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
+        switch (stmt) {
+            .FarkauStmt => |farkau_stmt| {
+                if (farkau_stmt.expr) |expr| {
+                    return InterpretResult{ .Return = self.evaluateExpr(expr) };
+                }
+            },
+            else => {},
+        }
+        return .Success;
+    }
+
+    fn execKaryaDeclStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .KaryaDeclStmt => |karya| {
                 var karya_name: []const u8 = karya.name;
@@ -86,48 +99,56 @@ pub const Interpreter = struct {
             },
             else => {},
         }
+        return .Success;
     }
 
-    fn execGhumauStmt(self: *Self, stmt: ast.Stmt) void {
+    fn execGhumauStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .GhumauStmt => |ghumau| {
-                var ghumau_expr_val: ?ast.LiteralValueType = self.evaluateExpr(ghumau.expr);
-                if (ghumau_expr_val) |value_type| {
-                    var create_var: bool = false;
-                    if (!std.mem.eql(u8, ghumau.identifier, "_")) create_var = true; // '_' is ignored
-                    switch (value_type) {
-                        .Float => |num_val| {
-                            for (0..@as(usize, @intFromFloat(num_val))) |_num| {
-                                if (create_var) {
-                                    self.execStmt(Interpreter._createRakhaStmt(
-                                        ghumau.identifier,
-                                        .{
-                                            .LiteralExpr = .{ .value = ast.LiteralValueType{ .Float = @floatFromInt(_num) } },
-                                        },
-                                    ));
-                                }
-                                self.execStmt(ghumau.stmt.*);
+                var value_type: ast.LiteralValueType = self.evaluateExpr(ghumau.expr);
+                var create_var: bool = false;
+                if (!std.mem.eql(u8, ghumau.identifier, "_")) create_var = true; // '_' is ignored
+                switch (value_type) {
+                    .Float => |num_val| {
+                        for (0..@as(usize, @intFromFloat(num_val))) |_num| {
+                            if (create_var) {
+                                _ = self.execStmt(Interpreter._createRakhaStmt(
+                                    ghumau.identifier,
+                                    .{
+                                        .LiteralExpr = .{ .value = ast.LiteralValueType{ .Float = @floatFromInt(_num) } },
+                                    },
+                                ));
                             }
-                        },
-                        .String => |str_val| {
-                            for (str_val) |char| {
-                                if (create_var) {
-                                    self.execStmt(Interpreter._createRakhaStmt(
-                                        ghumau.identifier,
-                                        .{
-                                            .LiteralExpr = .{ .value = ast.LiteralValueType{ .String = &[1]u8{char} } },
-                                        },
-                                    ));
-                                }
-                                self.execStmt(ghumau.stmt.*);
+                            var result: InterpretResult = self.execStmt(ghumau.stmt.*);
+                            switch (result) {
+                                .Success => continue,
+                                else => return result,
                             }
-                        },
-                        else => {}, // 'ghumau' statement not supported for this type
-                    }
+                        }
+                    },
+                    .String => |str_val| {
+                        for (str_val) |char| {
+                            if (create_var) {
+                                _ = self.execStmt(Interpreter._createRakhaStmt(
+                                    ghumau.identifier,
+                                    .{
+                                        .LiteralExpr = .{ .value = ast.LiteralValueType{ .String = &[1]u8{char} } },
+                                    },
+                                ));
+                            }
+                            var result: InterpretResult = self.execStmt(ghumau.stmt.*);
+                            switch (result) {
+                                .Success => continue,
+                                else => return result,
+                            }
+                        }
+                    },
+                    else => {}, // 'ghumau' statement not supported for this type
                 }
             },
             else => {},
         }
+        return .Success;
     }
 
     fn _createRakhaStmt(var_name: []const u8, expr: ast.Expr) ast.Stmt {
@@ -139,67 +160,67 @@ pub const Interpreter = struct {
         };
     }
 
-    fn execBlockStmt(self: *Self, stmt: ast.Stmt) void {
+    fn execBlockStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .BlockStmt => |block| {
                 for (block.stmts.items) |_stmt| {
-                    self.execStmt(_stmt.*);
-                }
-            },
-            else => {},
-        }
-    }
-
-    fn execYadiNatraStmt(self: *Self, stmt: ast.Stmt) void {
-        switch (stmt) {
-            .YadiNatraStmt => |yadi_natra| {
-                if (self.evaluateExpr(yadi_natra.condition)) |eval_res| {
-                    var condition: bool = switch (eval_res) {
-                        .Boolean => |bool_val| bool_val,
-                        .Float => |int_val| int_val != 0,
-                        .String => |str_val| !bu.strcmp(str_val, ""),
-                        else => false,
-                    };
-                    if (condition) {
-                        self.execStmt(yadi_natra.yadi_sahi.*);
-                    } else {
-                        if (@intFromPtr(yadi_natra.yadi_galat) != 0xAAAAAAAAAAAAAAAA) { // 0xAAAAAAAAAAAAAAAA = undefined
-                            self.execStmt(yadi_natra.yadi_galat.*.?);
-                        }
+                    var result: InterpretResult = self.execStmt(_stmt.*);
+                    switch (result) {
+                        .Success => continue,
+                        else => return result,
                     }
                 }
             },
             else => {},
         }
+        return .Success;
     }
 
-    fn execRakhaStmt(self: *Self, stmt: ast.Stmt) void {
+    fn execYadiNatraStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
+        switch (stmt) {
+            .YadiNatraStmt => |yadi_natra| {
+                var condition: bool = switch (self.evaluateExpr(yadi_natra.condition)) {
+                    .Boolean => |bool_val| bool_val,
+                    .Float => |int_val| int_val != 0,
+                    .String => |str_val| !bu.strcmp(str_val, ""),
+                    else => false,
+                };
+                if (condition) {
+                    return self.execStmt(yadi_natra.yadi_sahi.*);
+                } else {
+                    if (@intFromPtr(yadi_natra.yadi_galat) != 0xAAAAAAAAAAAAAAAA) { // 0xAAAAAAAAAAAAAAAA = undefined
+                        return self.execStmt(yadi_natra.yadi_sahi.*);
+                    }
+                }
+            },
+            else => {},
+        }
+        return .Success;
+    }
+
+    fn execRakhaStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .RakhaStmt => |rakha| {
                 var var_name: []const u8 = rakha.var_name;
-                if (self.evaluateExpr(rakha.expr)) |value| {
-                    self.var_env.put(var_name, value) catch |err| {
-                        std.debug.print("{any}\n", .{err});
-                    };
-                }
+                self.var_env.put(var_name, self.evaluateExpr(rakha.expr)) catch |err| {
+                    std.debug.print("{any}\n", .{err});
+                };
             },
             else => {},
         }
+        return .Success;
     }
 
-    fn execDekhauStmt(self: *Self, stmt: ast.Stmt) void {
+    fn execDekhauStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .DekhauStmt => |dekhau| {
                 switch (dekhau.expr) {
-                    else => |_| {
-                        if (self.evaluateExpr(dekhau.expr)) |value| {
-                            Interpreter.dumpLiteralValueType(value);
-                        }
-                    },
+                    else => Interpreter.dumpLiteralValueType((self.evaluateExpr(dekhau.expr))),
                 }
             },
             else => {},
         }
+        return .Success;
     }
 
     fn dumpLiteralValueType(lit: ast.LiteralValueType) void {
@@ -218,7 +239,7 @@ pub const Interpreter = struct {
         }
     }
 
-    fn evaluateExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+    fn evaluateExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         return switch (expr) {
             .LiteralExpr => |lit_expr| lit_expr.value,
             .VariableExpr => |_| self.evaluateVarExpr(expr),
@@ -229,78 +250,74 @@ pub const Interpreter = struct {
         };
     }
 
-    fn evaluateCallExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+    fn evaluateCallExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         switch (expr) {
             .CallExpr => |karya| {
                 var karya_name: []const u8 = karya.name;
                 if (self.func_decls.get(karya_name)) |body| {
-                    self.execStmt(body);
+                    return switch (self.execStmt(body)) {
+                        .Return => |lit_val| lit_val,
+                        else => .Null,
+                    };
                 }
-                return ast.LiteralValueType{ .Null = true };
+                // TODO: error: function not found
+                return .Null;
             },
-            else => return null,
+            else => return .Null,
         }
     }
 
-    fn evaluateUnaryExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+    fn evaluateUnaryExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         switch (expr) {
             .UnaryExpr => |unary| {
-                if (self.evaluateExpr(unary.expr.*)) |evaluated| {
-                    if (bu.strcmp(unary.operator, "chhaina")) {
-                        switch (evaluated) {
-                            .Boolean => |bool_val| return ast.LiteralValueType{ .Boolean = !bool_val },
-                            .Float => |float_val| return ast.LiteralValueType{ .Float = if (float_val != 0) 0 else 1 },
-                            else => return evaluated, // operator not supported for the given type
-                        }
-                    } else return evaluated;
-                } else return null;
+                var evaluated: ast.LiteralValueType = self.evaluateExpr(unary.expr.*);
+                if (bu.strcmp(unary.operator, "chhaina")) {
+                    switch (evaluated) {
+                        .Boolean => |bool_val| return ast.LiteralValueType{ .Boolean = !bool_val },
+                        .Float => |float_val| return ast.LiteralValueType{ .Float = if (float_val != 0) 0 else 1 },
+                        else => return evaluated, // operator not supported for the given type
+                    }
+                } else return evaluated;
             },
-            else => return null,
+            else => return .Null,
         }
     }
 
-    fn evaluateGroupExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+    fn evaluateGroupExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         return switch (expr) {
             .GroupExpr => |grp_expr| self.evaluateExpr(grp_expr.expr.*),
-            else => null,
+            else => .Null,
         };
     }
 
-    fn evaluateBinaryExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+    fn evaluateBinaryExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         return switch (expr) {
             .BinaryExpr => |bin_expr| {
-                var left_evaled: ast.LiteralValueType = undefined;
-                if (self.evaluateExpr(bin_expr.left.*)) |_expr| {
-                    left_evaled = _expr;
-                }
-
-                var right_evaled: ast.LiteralValueType = undefined;
-                if (self.evaluateExpr(bin_expr.right.*)) |_expr| {
-                    right_evaled = _expr;
-                }
+                var left_evaled: ast.LiteralValueType = self.evaluateExpr(bin_expr.left.*);
+                var right_evaled: ast.LiteralValueType = self.evaluateExpr(bin_expr.right.*);
                 return Interpreter.computeBinaryLiteralVal(left_evaled, right_evaled, bin_expr.operator);
             },
-            else => null,
+            else => .Null,
         };
     }
 
-    fn evaluateVarExpr(self: *Self, expr: ast.Expr) ?ast.LiteralValueType {
+    fn evaluateVarExpr(self: *Self, expr: ast.Expr) ast.LiteralValueType {
         switch (expr) {
             .VariableExpr => |var_expr| {
                 if (self.var_env.get(var_expr.var_name)) |value| {
                     return value;
                 } else {
                     std.debug.print("'{s}' naam gareko variable tapaile pahile banaunu vayeko chhaina\n", .{var_expr.var_name});
-                    return null;
+                    return .Null;
                 }
             },
             else => {
-                return null;
+                return .Null;
             },
         }
     }
 
-    fn computeBinaryLiteralVal(left: ast.LiteralValueType, right: ast.LiteralValueType, op: []const u8) ?ast.LiteralValueType {
+    fn computeBinaryLiteralVal(left: ast.LiteralValueType, right: ast.LiteralValueType, op: []const u8) ast.LiteralValueType {
         if (bu.strMatchesAny(op, &[2][]const u8{ "ra", "ya" })) {
             return Interpreter.evalBinaryOpLogical(op, left, right);
         } else if (bu.strMatchesAny(op, &[5][]const u8{ "+", "-", "/", "*", "**" })) {
@@ -310,10 +327,10 @@ pub const Interpreter = struct {
         } else if (bu.strMatchesAny(op, &[2][]const u8{ "sano", "thulo" })) {
             return Interpreter.evalBinaryOpComparision(op, left, right);
         }
-        return null;
+        return .Null;
     }
 
-    fn evalBinaryOpComparision(op: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+    fn evalBinaryOpComparision(op: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ast.LiteralValueType {
         var val1: f64 = switch (left) {
             .Float => |float_val| float_val,
             else => 0, // TODO: error: can'a apply comparision operator to types other than floats
@@ -327,10 +344,10 @@ pub const Interpreter = struct {
         } else if (bu.strcmp(op, "thulo")) {
             return ast.LiteralValueType{ .Boolean = val1 > val2 };
         }
-        return null;
+        return .Null;
     }
 
-    fn evalBinaryOpEquality(left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+    fn evalBinaryOpEquality(left: ast.LiteralValueType, right: ast.LiteralValueType) ast.LiteralValueType {
         var bool_res: bool = false;
         switch (left) {
             .Float => |float_val| {
@@ -359,7 +376,7 @@ pub const Interpreter = struct {
     }
 
     // TODO: add support for string concatination
-    fn evalBinaryOpArith(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+    fn evalBinaryOpArith(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ast.LiteralValueType {
         var val1: f64 = switch (left) {
             .Integer => |int_val| @as(f64, @floatFromInt(int_val)),
             .Float => |float_val| float_val,
@@ -385,14 +402,14 @@ pub const Interpreter = struct {
                 }
             }
             // TODO: error: '%' not supported for the given types
-            return null;
+            return .Null;
         } else if (std.mem.eql(u8, operator, "**")) {
             return ast.LiteralValueType{ .Float = std.math.pow(f64, val1, val2) };
         }
-        return null;
+        return .Null;
     }
 
-    fn evalBinaryOpLogical(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ?ast.LiteralValueType {
+    fn evalBinaryOpLogical(operator: []const u8, left: ast.LiteralValueType, right: ast.LiteralValueType) ast.LiteralValueType {
         var expr_res1 = switch (left) {
             .Boolean => |bool_val| bool_val,
             .Integer => |int_val| int_val != 0,
@@ -417,12 +434,13 @@ pub fn main() !void {
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\  karya printer() suru 
-        \\      ghumau 10 patak |num| suru
-        \\          dekhau num;
-        \\      antya
+        \\  karya max_of_2_and_3() suru 
+        \\      rakha a ma 3;
+        \\      rakha b ma 4;
+        \\      yadi a thulo b farkau a;
+        \\      natra farkau b;
         \\  antya
-        \\  printer();
+        \\  dekhau max_of_2_and_3();
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
