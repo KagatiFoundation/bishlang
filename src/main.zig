@@ -32,17 +32,28 @@ const InterpretResult = union(enum) {
 pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
     _internal_scope: scope.Scope,
+    allocator: std.mem.Allocator,
     const Self = @This();
 
-    pub fn init(stmts: std.ArrayList(ast.Stmt)) Self {
+    pub fn init(allocator: std.mem.Allocator, stmts: std.ArrayList(ast.Stmt)) Self {
         return Interpreter{
             .stmts = stmts,
-            ._internal_scope = scope.Scope.init(),
+            ._internal_scope = scope.Scope.init(allocator),
+            .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Self) void {
         self._internal_scope.deinit();
+        for (self.stmts.items) |item| {
+            switch (item) {
+                .KaryaDeclStmt => |karya_decl| {
+                    karya_decl.params.deinit();
+                },
+                else => {},
+            }
+        }
+        self.stmts.deinit();
     }
 
     pub fn interpret(self: *Self) void {
@@ -93,10 +104,7 @@ pub const Interpreter = struct {
         switch (stmt) {
             .KaryaDeclStmt => |karya| {
                 var karya_name: []const u8 = karya.name;
-                var karya_body: *ast.Stmt = karya.stmt;
-                self._internal_scope.func_decls.put(karya_name, karya_body.*) catch |err| {
-                    std.debug.panic("Error putting value on func_decls: {any}\n", .{err});
-                };
+                self._internal_scope.createNewFunc(karya_name, stmt);
             },
             else => {},
         }
@@ -164,22 +172,13 @@ pub const Interpreter = struct {
     fn execBlockStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
             .BlockStmt => |block| {
-                var current_scope: scope.Scope = self._internal_scope;
-                var new_scope: scope.Scope = current_scope.copy();
-                self._internal_scope = new_scope;
                 for (block.stmts.items) |_stmt| {
                     var result: InterpretResult = self.execStmt(_stmt.*);
                     switch (result) {
                         .Success => continue,
-                        else => {
-                            new_scope.deinit();
-                            self._internal_scope = current_scope;
-                            return result;
-                        },
+                        else => return result,
                     }
                 }
-                new_scope.deinit();
-                self._internal_scope = current_scope;
             },
             else => {},
         }
@@ -264,11 +263,32 @@ pub const Interpreter = struct {
         switch (expr) {
             .CallExpr => |karya| {
                 var karya_name: []const u8 = karya.name;
-                if (self._internal_scope.func_decls.get(karya_name)) |body| {
-                    return switch (self.execStmt(body)) {
-                        .Return => |lit_val| lit_val,
-                        else => .Null,
-                    };
+                if (self._internal_scope.func_decls.get(karya_name)) |karya_body| {
+                    switch (karya_body) {
+                        .KaryaDeclStmt => |karya_decl| {
+                            var current_scope: scope.Scope = self._internal_scope;
+                            var new_scope: scope.Scope = current_scope.copy();
+                            self._internal_scope = new_scope;
+                            for (0..karya_decl.params.items.len) |idx| {
+                                var param_name: []const u8 = karya_decl.params.items[idx];
+                                var param_value: ast.LiteralValueType = self.evaluateExpr(karya.exprs.items[idx].*);
+                                self._internal_scope.createNewVar(param_name, param_value);
+                            }
+                            var ret_val = switch (self.execStmt(karya_decl.stmt.*)) {
+                                .Return => |lit_val| lit_val,
+                                else => .Null,
+                            };
+                            new_scope.deinit();
+                            self._internal_scope = current_scope;
+
+                            for (karya.exprs.items) |expr_item| {
+                                self.allocator.destroy(expr_item);
+                            }
+                            karya.exprs.deinit(); // free the expressions list
+                            return ret_val;
+                        },
+                        else => return .Null,
+                    }
                 }
                 // TODO: error: function not found
                 return .Null;
@@ -441,30 +461,37 @@ pub const Interpreter = struct {
 };
 
 pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
+
     scanner.init();
     defer scanner.deinit();
     const source =
-        \\  rakha a ma 100;
-        \\  karya max_of_2_and_3() suru 
-        \\      rakha b ma 5;
-        \\      yadi a thulo b farkau a;
-        \\      natra farkau b;
+        \\  karya LOG(msg) suru
+        \\      dekhau "LOG...";
+        \\      dekhau msg;
         \\  antya
-        \\  dekhau max_of_2_and_3();
-        \\  dekhau a;
-        \\  rakha cc ma 444;
-        \\  dekhau cc;
+        \\
+        \\  LOG("Memory Leak");
     ;
     var ss = scanner.Scanner(source){};
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     if (!ss.has_error) {
-        var p: parser.Parser = parser.Parser.init(source, tokens);
-        defer parser.Parser.deinit();
+        var p: parser.Parser = parser.Parser.init(allocator.allocator(), source, tokens);
         var stmts: std.ArrayList(ast.Stmt) = try p.parse();
         if (!p.has_error) {
-            var int: Interpreter = Interpreter.init(stmts);
-            defer int.deinit();
+            var int: Interpreter = Interpreter.init(allocator.allocator(), stmts);
             int.interpret();
+            int.deinit();
         }
+        p.deinit();
+    }
+
+    allocator.deinit();
+    switch (gpa.deinit()) {
+        .leak => {
+            std.debug.print("PANICKED BECAUSE MEMORY LEAK...", .{});
+        },
+        .ok => {},
     }
 }

@@ -19,6 +19,7 @@ const std = @import("std");
 const scanner = @import("./scanner.zig");
 const ast = @import("./ast.zig");
 const errorutil = @import("./utils//errorutil.zig");
+const bu = @import("./utils/bishutil.zig");
 
 // errors which may show up during parsing tokens
 const ParseError = error{
@@ -41,14 +42,13 @@ pub const Parser = struct {
     current: usize,
     tokens_len: usize,
     has_error: bool,
+    allocator: std.mem.Allocator,
+    exprs_allocated: std.ArrayList(*ast.Expr),
+    stmts_allocated: std.ArrayList(*ast.Stmt),
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
-    var exprs_allocated = std.ArrayList(*ast.Expr).init(allocator.allocator());
-    var stmts_allocated = std.ArrayList(*ast.Stmt).init(allocator.allocator());
     const Self: type = @This();
 
-    pub fn init(source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
+    pub fn init(allocator: std.mem.Allocator, source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
         errorutil.initErrorEngine(source);
         return .{
             .source_lines = std.mem.split(u8, source, "\n"),
@@ -56,30 +56,25 @@ pub const Parser = struct {
             .current = 0,
             .tokens_len = tokens.items.len,
             .has_error = false,
+            .allocator = allocator,
+            .exprs_allocated = std.ArrayList(*ast.Expr).init(allocator),
+            .stmts_allocated = std.ArrayList(*ast.Stmt).init(allocator),
         };
     }
 
-    pub fn deinit() void {
-        var _dealloc: std.mem.Allocator = allocator.allocator();
-        for (exprs_allocated.items) |expr| {
-            _dealloc.destroy(expr);
+    pub fn deinit(self: *Self) void {
+        for (self.exprs_allocated.items) |expr| {
+            self.allocator.destroy(expr);
         }
-
-        for (stmts_allocated.items) |stmt| {
-            _dealloc.destroy(stmt);
+        for (self.stmts_allocated.items) |stmt| {
+            self.allocator.destroy(stmt);
         }
-        _ = allocator.deinit();
-
-        switch (gpa.deinit()) {
-            .leak => {
-                std.debug.panic("There was memory leak in this program!!!", .{});
-            },
-            else => {},
-        }
+        self.exprs_allocated.deinit();
+        self.stmts_allocated.deinit();
     }
 
     pub fn parse(self: *Self) !std.ArrayList(ast.Stmt) {
-        var stmts: std.ArrayList(ast.Stmt) = std.ArrayList(ast.Stmt).init(std.heap.page_allocator);
+        var stmts: std.ArrayList(ast.Stmt) = std.ArrayList(ast.Stmt).init(self.allocator);
         while (!self.isAtEnd()) {
             if (self.parseStmt()) |stmt| {
                 _ = try stmts.append(stmt);
@@ -156,12 +151,11 @@ pub const Parser = struct {
                 return ast.Stmt{ .ExprStmt = .{ .expr = expr } };
             }
         } else {
-            var arena: std.mem.Allocator = Parser.allocator.allocator();
-            var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
+            var msg: []u8 = std.fmt.allocPrint(self.allocator, "'{s}' yaha aasha gariyeko thiyiyena", .{now.lexeme}) catch |_err| {
                 std.debug.panic("Error: {any}\n", .{_err});
             };
             errorutil.reportErrorFatal(now, msg, null);
-            arena.free(msg);
+            self.allocator.free(msg);
         }
         self.has_error = true;
         self.hopToNextStmt();
@@ -189,7 +183,6 @@ pub const Parser = struct {
     }
 
     fn parseKaryaDeclStmt(self: *Self) ?ast.Stmt {
-        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
         var name_token: scanner.Token = self.peek();
         if (name_token.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
             self.skip(); // skip karya name
@@ -198,8 +191,46 @@ pub const Parser = struct {
                 self.hopToNextStmt();
                 return null;
             }
-            // parse parameter list here
             self.skip(); // skip '('
+            // parsing parameter names
+            var now: scanner.Token = self.peek();
+            var param_names = std.ArrayList([]const u8).init(self.allocator);
+            if (now.token_type != scanner.TokenType.TOKEN_RIGHT_PAREN) {
+                while (true) {
+                    if (now.token_type != scanner.TokenType.TOKEN_IDENTIFIER) {
+                        // This situation will arise in the first run of this loop.
+                        // This situation can arise in or from the second iteration of this infinite while loop.
+                        // If this situation arises, we just break out of it.
+                        if (now.token_type == scanner.TokenType.TOKEN_RIGHT_PAREN) break;
+                        errorutil.reportErrorFatal(now, "yaha parameter ko naam sachyaunus", "yo parameter ko naam galat ho");
+                        self.hopToNextStmt();
+                        return null;
+                    }
+                    var new_var_name: []const u8 = now.lexeme;
+                    if (bu.stringArrListContains(new_var_name, param_names)) {
+                        errorutil.reportErrorFatal(now, "ustai naam ko parameter feri vetiyo", "Yo naam ko parameter pahile banisakeko chha");
+                        self.hopToNextStmt();
+                        return null;
+                    }
+                    param_names.append(now.lexeme) catch |app_err| {
+                        std.debug.panic("Error adding parameter name to the ArrayList: {any}\n", .{app_err});
+                    }; // add 'parameter' name to function parameter list
+                    self.skip(); // skip parameter name
+                    now = self.peek();
+                    if (now.token_type == scanner.TokenType.TOKEN_RIGHT_PAREN) {
+                        break;
+                    } else if (now.token_type == scanner.TokenType.TOKEN_COMMA) {
+                        self.skip(); // skip ','
+                        now = self.peek(); // point to next parameter name
+                        continue;
+                    } else {
+                        errorutil.reportErrorFatal(now, "TODO ERROR MESSAGE!!!", "yaha ',' ya ')' aaunu parne hunchha");
+                        self.hopToNextStmt();
+                        return null;
+                    }
+                }
+            }
+
             if (!self.expectToken(scanner.TokenType.TOKEN_RIGHT_PAREN, ")")) {
                 self.has_error = true;
                 self.hopToNextStmt();
@@ -207,18 +238,18 @@ pub const Parser = struct {
             }
             self.skip(); // skip ')'
             if (self.parseStmt()) |stmt| {
-                var karya_body_stmt: *ast.Stmt = tmp_alloc.create(ast.Stmt) catch |err| {
+                var karya_body_stmt: *ast.Stmt = self.allocator.create(ast.Stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
                 };
                 karya_body_stmt.* = stmt;
-                Parser.stmts_allocated.append(karya_body_stmt) catch |app_err| {
+                self.stmts_allocated.append(karya_body_stmt) catch |app_err| {
                     std.debug.panic("Error: {any}\n", .{app_err});
                 };
                 return ast.Stmt{
                     .KaryaDeclStmt = .{
                         .name = name_token.lexeme,
                         .stmt = karya_body_stmt,
-                        .params = &[0][]const u8{},
+                        .params = param_names,
                     },
                 };
             } else return null;
@@ -229,7 +260,6 @@ pub const Parser = struct {
 
     // <ghumau-statement> ::= GHUMAU <expression> PATAK [|<variable>|]  { <statement-list> }
     fn parseGhumauStmt(self: *Self) ?ast.Stmt {
-        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
         if (self.parseExpr()) |expr| {
             if (!self.expectToken(scanner.TokenType.KW_PATAK, "patak")) {
                 self.has_error = true;
@@ -261,11 +291,11 @@ pub const Parser = struct {
                 }
             }
             if (self.parseStmt()) |stmt| {
-                var ghumau_body_stmt: *ast.Stmt = tmp_alloc.create(ast.Stmt) catch |err| {
+                var ghumau_body_stmt: *ast.Stmt = self.allocator.create(ast.Stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
                 };
                 ghumau_body_stmt.* = stmt;
-                Parser.stmts_allocated.append(ghumau_body_stmt) catch |app_err| {
+                self.stmts_allocated.append(ghumau_body_stmt) catch |app_err| {
                     std.debug.panic("Error: {any}\n", .{app_err});
                 };
                 return ast.Stmt{
@@ -283,15 +313,14 @@ pub const Parser = struct {
     }
 
     fn parseYadiStmt(self: *Self) ?ast.Stmt {
-        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
         if (self.parseExpr()) |expr| {
             var yadi_sahi: *ast.Stmt = undefined;
             if (self.parseStmt()) |ys| {
-                yadi_sahi = tmp_alloc.create(ast.Stmt) catch |errr| {
+                yadi_sahi = self.allocator.create(ast.Stmt) catch |errr| {
                     std.debug.panic("Error: {any}\n", .{errr});
                 };
                 yadi_sahi.* = ys;
-                Parser.stmts_allocated.append(yadi_sahi) catch |app_err| {
+                self.stmts_allocated.append(yadi_sahi) catch |app_err| {
                     std.debug.panic("Error: {any}\n", .{app_err});
                 };
             } else return null;
@@ -301,11 +330,11 @@ pub const Parser = struct {
             if (now.token_type == scanner.TokenType.KW_NATRA) {
                 self.current += 1;
                 if (self.parseStmt()) |yd| {
-                    yadi_galat = tmp_alloc.create(?ast.Stmt) catch |errr| {
+                    yadi_galat = self.allocator.create(?ast.Stmt) catch |errr| {
                         std.debug.panic("Error: {any}\n", .{errr});
                     };
                     yadi_galat.* = yd;
-                    Parser.stmts_allocated.append(&yadi_galat.*.?) catch |app_err| {
+                    self.stmts_allocated.append(&yadi_galat.*.?) catch |app_err| {
                         std.debug.panic("Error: {any}\n", .{app_err});
                     };
                 } else return null;
@@ -324,20 +353,19 @@ pub const Parser = struct {
     }
 
     fn parseBlockStmt(self: *Self) ?ast.Stmt {
-        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
         var block_start_token: scanner.Token = self.tokens.items[self.current - 1]; // 'suru' token
-        var stmts: std.ArrayList(*ast.Stmt) = std.ArrayList(*ast.Stmt).init(Parser.allocator.allocator());
+        var stmts: std.ArrayList(*ast.Stmt) = std.ArrayList(*ast.Stmt).init(self.allocator);
         while (true) {
             var now: scanner.Token = self.peek();
             if (now.token_type == scanner.TokenType.KW_ANTYA or now.token_type == scanner.TokenType.TOKEN_EOF) {
                 break;
             }
             if (self.parseStmt()) |stmt| {
-                var tmp_stmt: *ast.Stmt = tmp_alloc.create(ast.Stmt) catch |err| {
+                var tmp_stmt: *ast.Stmt = self.allocator.create(ast.Stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
                 };
                 tmp_stmt.* = stmt;
-                Parser.stmts_allocated.append(tmp_stmt) catch |err| {
+                self.stmts_allocated.append(tmp_stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
                 };
                 stmts.append(tmp_stmt) catch |err| {
@@ -423,16 +451,15 @@ pub const Parser = struct {
                 var now: scanner.Token = self.peek();
                 if (now.token_type == scanner.TokenType.KW_CHHA or now.token_type == scanner.TokenType.TOKEN_CHHAINA) {
                     self.skip(); // skip 'chha' or 'chhaina'
-                    var arena: std.mem.Allocator = Parser.allocator.allocator();
-                    var tmp_alloc: *ast.Expr = arena.create(ast.Expr) catch |err| {
+                    var tmp_expr: *ast.Expr = self.allocator.create(ast.Expr) catch |err| {
                         std.debug.panic("Error: {any}\n", .{err});
                     };
-                    tmp_alloc.* = expr;
-                    Parser.exprs_allocated.append(tmp_alloc) catch |app_err| {
+                    tmp_expr.* = expr;
+                    self.exprs_allocated.append(tmp_expr) catch |app_err| {
                         std.debug.panic("Error: {any}\n", .{app_err});
                     };
                     return ast.Expr{ .UnaryExpr = .{
-                        .expr = tmp_alloc,
+                        .expr = tmp_expr,
                         .operator = now.lexeme,
                     } };
                 }
@@ -445,12 +472,11 @@ pub const Parser = struct {
                         errorutil.reportErrorFatal(err.err_token, "'(' suru garisakepacchi banda pani garnuhos", null);
                     },
                     ParseError.UnexpectedToken => {
-                        var arena: std.mem.Allocator = Parser.allocator.allocator();
-                        var msg: []u8 = std.fmt.allocPrint(arena, "'{s}' yaha aasha gariyeko thiyiyena", .{err.err_token.lexeme}) catch |_err| {
+                        var msg: []u8 = std.fmt.allocPrint(self.allocator, "'{s}' yaha aasha gariyeko thiyiyena", .{err.err_token.lexeme}) catch |_err| {
                             std.debug.panic("Error: {any}\n", .{_err});
                         };
                         errorutil.reportErrorFatal(err.err_token, msg, "yeslai hataunu hos");
-                        arena.free(msg);
+                        self.allocator.free(msg);
                     },
                 }
                 return null;
@@ -525,7 +551,7 @@ pub const Parser = struct {
                     var right_side_res: ParseResult = self.parseLogicalOr();
                     return switch (right_side_res) {
                         .Success => |right_side_expr| ParseResult{
-                            .Success = Parser.createBinaryExpr(
+                            .Success = self.createBinaryExpr(
                                 left_side_expr,
                                 right_side_expr,
                                 operator,
@@ -548,10 +574,32 @@ pub const Parser = struct {
             .Success => |prim_expr| {
                 if (self.peek().token_type == scanner.TokenType.TOKEN_LEFT_PAREN) {
                     self.skip(); // skip '('
-                    if (!self.expectToken(scanner.TokenType.TOKEN_RIGHT_PAREN, ")")) {
-                        var now: scanner.Token = self.peek();
-                        self.hopToNextStmt();
-                        return Parser.unexpectedTokenErr(now);
+                    var now: scanner.Token = self.peek();
+                    var exprs = std.ArrayList(*ast.Expr).init(self.allocator);
+                    if (now.token_type != scanner.TokenType.TOKEN_RIGHT_PAREN) {
+                        while (true) {
+                            if (self.parseExpr()) |expr| {
+                                var tmp_expr: *ast.Expr = self.allocator.create(ast.Expr) catch |cre_err| {
+                                    std.debug.panic("Can't create a new expression: {any}\n", .{cre_err});
+                                };
+                                tmp_expr.* = expr;
+                                exprs.append(tmp_expr) catch |app_err| {
+                                    std.debug.panic("Can't append a new expression into function call expression list: {any}\n", .{app_err});
+                                };
+                            }
+                            now = self.peek();
+                            if (now.token_type == scanner.TokenType.TOKEN_RIGHT_PAREN) {
+                                break;
+                            } else if (now.token_type == scanner.TokenType.TOKEN_COMMA) {
+                                self.skip(); // skip ','
+                                now = self.peek(); // point to next argument expression
+                                continue;
+                            } else {
+                                errorutil.reportErrorFatal(now, "chaiyeko expression tara vetiyo ''", "yaha ',' ya ')' aaunu parne hunchha");
+                                self.hopToNextStmt();
+                                return Parser.unexpectedTokenErr(now);
+                            }
+                        }
                     }
                     self.skip(); // skip ')'
                     switch (prim_expr) {
@@ -559,6 +607,7 @@ pub const Parser = struct {
                             return ParseResult{ .Success = .{
                                 .CallExpr = .{
                                     .name = var_expr.var_name,
+                                    .exprs = exprs,
                                 },
                             } };
                         },
@@ -608,7 +657,7 @@ pub const Parser = struct {
                         };
                     }
                     self.skip(); // skip ')'
-                    return ParseResult{ .Success = Parser.createGroupExpr(group_expr) };
+                    return ParseResult{ .Success = self.createGroupExpr(group_expr) };
                 },
                 .Error => |_| return Parser.unexpectedTokenErr(self.peek()),
             }
@@ -618,33 +667,31 @@ pub const Parser = struct {
         }
     }
 
-    fn createGroupExpr(expr: ast.Expr) ast.Expr {
-        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
-        var tmp_expr = tmp_alloc.create(ast.Expr) catch |err| {
+    fn createGroupExpr(self: *Self, expr: ast.Expr) ast.Expr {
+        var tmp_expr = self.allocator.create(ast.Expr) catch |err| {
             std.debug.panic("Error: {any}\n", .{err});
         };
         tmp_expr.* = expr;
-        Parser.exprs_allocated.append(tmp_expr) catch |err| {
+        self.exprs_allocated.append(tmp_expr) catch |err| {
             std.debug.panic("Error: {any}\n", .{err});
         };
         return ast.Expr{ .GroupExpr = .{ .expr = tmp_expr } };
     }
 
-    fn createBinaryExpr(expr1: ast.Expr, expr2: ast.Expr, operator: []const u8) ast.Expr {
-        var tmp_alloc: std.mem.Allocator = Parser.allocator.allocator();
-        var leftt = tmp_alloc.create(ast.Expr) catch |errr| {
+    fn createBinaryExpr(self: *Self, expr1: ast.Expr, expr2: ast.Expr, operator: []const u8) ast.Expr {
+        var leftt = self.allocator.create(ast.Expr) catch |errr| {
             std.debug.panic("Error: {any}\n", .{errr});
         };
         leftt.* = expr1;
-        Parser.exprs_allocated.append(leftt) catch |app_err| {
+        self.exprs_allocated.append(leftt) catch |app_err| {
             std.debug.panic("Error: {any}\n", .{app_err});
         };
 
-        var rightt = tmp_alloc.create(ast.Expr) catch |errr| {
+        var rightt = self.allocator.create(ast.Expr) catch |errr| {
             std.debug.panic("Error: {any}\n", .{errr});
         };
         rightt.* = expr2;
-        Parser.exprs_allocated.append(rightt) catch |app_err| {
+        self.exprs_allocated.append(rightt) catch |app_err| {
             std.debug.panic("Error: {any}\n", .{app_err});
         };
         return ast.Expr{
@@ -695,16 +742,15 @@ pub const Parser = struct {
         var now: scanner.Token = self.peek();
         if (now.token_type != expected_type) {
             if (now.token_type != scanner.TokenType.TOKEN_EOF) {
-                var arena: std.mem.Allocator = Parser.allocator.allocator();
-                var msg: []u8 = std.fmt.allocPrint(arena, "chaiyeko '{s}' tara vetiyo '{s}'", .{ token_lexeme, now.lexeme }) catch |_err| {
+                var msg: []u8 = std.fmt.allocPrint(self.allocator, "chaiyeko '{s}' tara vetiyo '{s}'", .{ token_lexeme, now.lexeme }) catch |_err| {
                     std.debug.panic("Error: {any}\n", .{_err});
                 };
-                var hint: []u8 = std.fmt.allocPrint(arena, "yaha '{s}' lekhnus", .{token_lexeme}) catch |_err| {
+                var hint: []u8 = std.fmt.allocPrint(self.allocator, "yaha '{s}' lekhnus", .{token_lexeme}) catch |_err| {
                     std.debug.panic("Error: {any}\n", .{_err});
                 };
                 errorutil.reportErrorFatal(now, msg, hint);
-                arena.free(msg);
-                arena.free(hint);
+                self.allocator.free(msg);
+                self.allocator.free(hint);
                 self.has_error = true;
                 return false;
             }

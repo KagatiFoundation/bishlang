@@ -21,14 +21,14 @@ const ast = @import("./ast.zig");
 pub const Scope = struct {
     var_env: std.StringHashMap(ast.LiteralValueType),
     func_decls: std.StringHashMap(ast.Stmt),
+    allocator: std.mem.Allocator,
     const Self = @This();
-    var _gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const _alloc: std.mem.Allocator = _gpa.allocator();
 
-    pub fn init() Self {
+    pub fn init(allocator: std.mem.Allocator) Self {
         return .{
-            .var_env = std.StringHashMap(ast.LiteralValueType).init(_alloc),
-            .func_decls = std.StringHashMap(ast.Stmt).init(_alloc),
+            .var_env = std.StringHashMap(ast.LiteralValueType).init(allocator),
+            .func_decls = std.StringHashMap(ast.Stmt).init(allocator),
+            .allocator = allocator,
         };
     }
 
@@ -60,7 +60,7 @@ pub const Scope = struct {
     }
 
     pub fn copy(self: *Self) Self {
-        var new_scope: Scope = Scope.init();
+        var new_scope: Scope = Scope.init(self.allocator);
         var var_env = self.var_env.iterator();
         var func_env = self.func_decls.iterator();
         while (var_env.next()) |_var| {

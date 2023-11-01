@@ -51,6 +51,7 @@ pub const Expr = union(enum) {
 
     CallExpr: struct {
         name: []const u8,
+        exprs: std.ArrayList(*Expr),
     },
 };
 
@@ -92,7 +93,7 @@ pub const Stmt = union(enum) {
     // <karya-statement> ::= KARYA <variable>([<parameter-list>]) <block-statement>
     KaryaDeclStmt: struct {
         name: []const u8,
-        params: []const []const u8,
+        params: std.ArrayList([]const u8),
         stmt: *Stmt,
     },
 

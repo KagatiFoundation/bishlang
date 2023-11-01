@@ -29,3 +29,10 @@ pub fn strMatchesAny(needle: []const u8, haystack: []const []const u8) bool {
     }
     return false;
 }
+
+pub fn stringArrListContains(needle: []const u8, arr: std.ArrayList([]const u8)) bool {
+    for (arr.items) |item| {
+        if (strcmp(needle, item)) return true;
+    }
+    return false;
+}
