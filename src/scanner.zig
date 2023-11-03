@@ -135,207 +135,210 @@ pub const Token = struct {
     }
 };
 
-pub fn Scanner(comptime source: []const u8) type {
-    const allocator = arena.allocator();
-    return struct {
-        source: []const u8 = source,
-        line: usize = 0,
-        tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator),
-        errors: std.ArrayList(ScannerError) = std.ArrayList(ScannerError).init(allocator),
-        has_error: bool = false,
-        const Self = @This();
+pub const Scanner = struct {
+    source: []const u8,
+    line: usize = 0,
+    tokens: std.ArrayList(Token),
+    errors: std.ArrayList(ScannerError),
+    has_error: bool,
+    allocator: std.mem.Allocator,
+    const Self = @This();
 
-        pub fn scanTokens(self: *Self) !std.ArrayList(Token) {
-            var source_lines = std.mem.split(u8, self.source, "\n");
-            while (source_lines.next()) |line| {
-                self.line += 1; // increment line count by one
-                if (line.len == 0) {
-                    continue;
-                }
-                var tokens = try self.scanTokensLine(line);
-                for (tokens.items) |item| {
-                    _ = try self.tokens.append(item);
-                }
-            }
-
-            // dumping errors(if any)
-            if (self.has_error) {
-                for (self.errors.items) |item| {
-                    item.dump();
-                }
-            }
-
-            const last_token: Token = self.tokens.getLast();
-            const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = self.line, .column = (last_token.column + last_token.lexeme.len) };
-            _ = try self.tokens.append(eof);
-            return self.tokens;
+    pub fn init(allocator: std.mem.Allocator, source: []const u8) Self {
+        if (init_keywords()) |status| {
+            _ = status;
+        } else |err| {
+            std.debug.panic("Some error while initializing the scanner: {?}\n", .{err});
         }
-
-        fn scanTokensLine(self: *Self, line: []const u8) !std.ArrayList(Token) {
-            var pos: usize = 0;
-            var start: usize = 0;
-            var tokens: std.ArrayList(Token) = std.ArrayList(Token).init(allocator);
-            const len: usize = line.len;
-            while (pos < len) {
-                start = pos;
-                const char = line[pos];
-                if (std.ascii.isDigit(char)) {
-                    pos = self.parseInt(pos, line);
-                    const literal = line[start..pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_FLOAT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
-                    _ = try tokens.append(token);
-                } else if (char == '"' or char == '\'') {
-                    var tmpPos = self.parseStr(pos, line);
-                    if (tmpPos == 0xFFFFFFFF) {
-                        return tokens;
-                    }
-                    pos = tmpPos;
-                    const literal = line[start + 1 .. pos];
-                    const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
-                    _ = try tokens.append(token);
-                    pos += 1; // advance past the end quotation
-                } else if (std.ascii.isAlphabetic(char) or char == '_') {
-                    pos = self.parseKeywordOrIdentifier(pos, line);
-                    const lexeme = line[start..pos];
-                    var tok = self._nonLiteralToken(TokenType.TOKEN_IDENTIFIER, lexeme, start + 1);
-                    if (KEYWORDS.get(lexeme)) |keywordTokType| {
-                        tok.token_type = keywordTokType;
-                    }
-                    _ = try tokens.append(tok);
-                } else {
-                    if (char == '+') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PLUS, "+", start + 1));
-                    } else if (char == '-') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_MINUS, "-", start + 1));
-                    } else if (char == '*') {
-                        if ((pos + 1) < len) {
-                            if (line[pos + 1] == '*') {
-                                _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_POWER, "**", start + 1));
-                                pos += 2;
-                                continue;
-                            }
-                        }
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_STAR, "*", start + 1));
-                    } else if (char == '/') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SLASH, "/", start + 1));
-                    } else if (char == ';') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SEMICOLON, ";", start + 1));
-                    } else if (char == '(') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_LEFT_PAREN, "(", start + 1));
-                    } else if (char == ')') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, ")", start + 1));
-                    } else if (char == '|') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PIPE, "|", start + 1));
-                    } else if (char == '%') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PERCENTAGE, "%", start + 1));
-                    } else if (char == ',') {
-                        _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_COMMA, ",", start + 1));
-                    }
-                    pos += 1;
-                }
-            }
-            return tokens;
+        if (ScannerError.init_errors()) |status| {
+            _ = status;
+        } else |err| {
+            std.debug.panic("Some error while initializing the scanner: {?}\n", .{err});
         }
+        return Self{
+            .source = source,
+            .line = 0,
+            .tokens = std.ArrayList(Token).init(allocator),
+            .errors = std.ArrayList(ScannerError).init(allocator),
+            .has_error = false,
+            .allocator = allocator,
+        };
+    }
 
-        fn parseKeywordOrIdentifier(self: *Self, pos: usize, line: []const u8) usize {
-            _ = self;
-            var mutablePos: usize = pos;
-            mutablePos += 1; // skip past the first character
-            const len = line.len;
-            if (mutablePos < len) {
-                var char = line[mutablePos];
-                while (char == '_' or std.ascii.isAlphabetic(char) or std.ascii.isDigit(char)) {
-                    mutablePos += 1;
-                    if (mutablePos >= len) {
-                        break;
-                    }
-                    char = line[mutablePos];
-                }
+    pub fn deinit(self: *Self) void {
+        self.tokens.deinit();
+        self.errors.deinit();
+        KEYWORDS.deinit();
+        ScannerError.errors.deinit();
+    }
+
+    pub fn scanTokens(self: *Self) !std.ArrayList(Token) {
+        var source_lines = std.mem.split(u8, self.source, "\n");
+        while (source_lines.next()) |line| {
+            self.line += 1; // increment line count by one
+            if (line.len == 0) {
+                continue;
             }
-            return mutablePos;
-        }
-
-        fn parseInt(self: *Self, pos: usize, line: []const u8) usize {
-            _ = self;
-            var mutablePos: usize = pos;
-            const len = line.len;
-            mutablePos += 1;
-            if (mutablePos < len) {
-                var char = line[mutablePos];
-                while (mutablePos < len and std.ascii.isDigit(char)) {
-                    mutablePos += 1;
-                    if (mutablePos >= len) {
-                        break;
-                    }
-                    char = line[mutablePos];
-                }
+            var tokens = try self.scanTokensLine(line);
+            for (tokens.items) |item| {
+                _ = try self.tokens.append(item);
             }
-            return mutablePos;
+            tokens.deinit();
         }
+        // dumping errors(if any)
+        if (self.has_error) {
+            for (self.errors.items) |item| {
+                item.dump();
+            }
+        }
+        const last_token: Token = self.tokens.getLast();
+        const eof: Token = Token{ .token_type = TokenType.TOKEN_EOF, .literal = "", .lexeme = "", .line = self.line, .column = (last_token.column + last_token.lexeme.len) };
+        _ = try self.tokens.append(eof);
+        return self.tokens;
+    }
 
-        fn parseStr(self: *Self, pos: usize, line: []const u8) usize {
-            var mutablePos: usize = pos;
-            const quoteStyle = line[mutablePos];
-            const len = line.len;
-            mutablePos += 1;
-            if (mutablePos < len) {
-                while (true) {
-                    var isEnd: bool = mutablePos >= len;
-                    if (!isEnd) {
-                        var _peek: u8 = line[mutablePos];
-                        if (_peek == quoteStyle) {
-                            break;
-                        }
-                        mutablePos += 1;
-                    } else {
-                        self.genUnterminatedStrErr(pos, line);
-                        return 0xFFFFFFFF;
-                    }
+    fn scanTokensLine(self: *Self, line: []const u8) !std.ArrayList(Token) {
+        var pos: usize = 0;
+        var start: usize = 0;
+        var tokens: std.ArrayList(Token) = std.ArrayList(Token).init(self.allocator);
+        const len: usize = line.len;
+        while (pos < len) {
+            start = pos;
+            const char = line[pos];
+            if (std.ascii.isDigit(char)) {
+                pos = self.parseInt(pos, line);
+                const literal = line[start..pos];
+                const token = Token{ .token_type = TokenType.TOKEN_FLOAT, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
+                _ = try tokens.append(token);
+            } else if (char == '"' or char == '\'') {
+                var tmpPos = self.parseStr(pos, line);
+                if (tmpPos == 0xFFFFFFFF) {
+                    return tokens;
                 }
+                pos = tmpPos;
+                const literal = line[start + 1 .. pos];
+                const token = Token{ .token_type = TokenType.TOKEN_STRING, .lexeme = literal, .literal = literal, .line = self.line, .column = start + 1 };
+                _ = try tokens.append(token);
+                pos += 1; // advance past the end quotation
+            } else if (std.ascii.isAlphabetic(char) or char == '_') {
+                pos = self.parseKeywordOrIdentifier(pos, line);
+                const lexeme = line[start..pos];
+                var tok = self._nonLiteralToken(TokenType.TOKEN_IDENTIFIER, lexeme, start + 1);
+                if (KEYWORDS.get(lexeme)) |keywordTokType| {
+                    tok.token_type = keywordTokType;
+                }
+                _ = try tokens.append(tok);
             } else {
-                self.genUnterminatedStrErr(pos, line);
-                return 0xFFFFFFFF;
+                if (char == '+') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PLUS, "+", start + 1));
+                } else if (char == '-') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_MINUS, "-", start + 1));
+                } else if (char == '*') {
+                    if ((pos + 1) < len) {
+                        if (line[pos + 1] == '*') {
+                            _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_POWER, "**", start + 1));
+                            pos += 2;
+                            continue;
+                        }
+                    }
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_STAR, "*", start + 1));
+                } else if (char == '/') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SLASH, "/", start + 1));
+                } else if (char == ';') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_SEMICOLON, ";", start + 1));
+                } else if (char == '(') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_LEFT_PAREN, "(", start + 1));
+                } else if (char == ')') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_RIGHT_PAREN, ")", start + 1));
+                } else if (char == '|') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PIPE, "|", start + 1));
+                } else if (char == '%') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_PERCENTAGE, "%", start + 1));
+                } else if (char == ',') {
+                    _ = try tokens.append(self._nonLiteralToken(TokenType.TOKEN_COMMA, ",", start + 1));
+                }
+                pos += 1;
             }
-            return mutablePos;
         }
-
-        fn genUnterminatedStrErr(self: *Self, pos: usize, line: []const u8) void {
-            const errTok = Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = pos + 1 };
-            var err = ScannerError{ .err_type = ScannerError.E.SYNTAX_ERROR, .err_subtype = ScannerError.E.UNTERMINATED_STR, .token = errTok, .src_line = line };
-            self.errors.append(err) catch |_err| {
-                std.debug.print("{?}", .{_err});
-            };
-            self.has_error = true;
-        }
-
-        fn _nonLiteralToken(self: *Self, tok_type: TokenType, lexeme: []const u8, column: usize) Token {
-            return Token{ .token_type = tok_type, .lexeme = lexeme, .literal = lexeme, .line = self.line, .column = column };
-        }
-
-        fn isAtEnd(self: *Self) bool {
-            return self.current >= self.source.len;
-        }
-    };
-}
-
-pub fn init() void {
-    if (init_keywords()) |status| {
-        _ = status;
-    } else |err| {
-        std.debug.print("Some error while initializing the scanner: {?}\n", .{err});
-        return;
+        return tokens;
     }
 
-    if (ScannerError.init_errors()) |status| {
-        _ = status;
-    } else |err| {
-        std.debug.print("Some error while initializing the scanner: {?}\n", .{err});
-        return;
+    fn parseKeywordOrIdentifier(self: *Self, pos: usize, line: []const u8) usize {
+        _ = self;
+        var mutablePos: usize = pos;
+        mutablePos += 1; // skip past the first character
+        const len = line.len;
+        if (mutablePos < len) {
+            var char = line[mutablePos];
+            while (char == '_' or std.ascii.isAlphabetic(char) or std.ascii.isDigit(char)) {
+                mutablePos += 1;
+                if (mutablePos >= len) {
+                    break;
+                }
+                char = line[mutablePos];
+            }
+        }
+        return mutablePos;
     }
-}
 
-pub fn deinit() void {
-    arena.deinit();
-    KEYWORDS.deinit();
-    ScannerError.errors.deinit();
-}
+    fn parseInt(self: *Self, pos: usize, line: []const u8) usize {
+        _ = self;
+        var mutablePos: usize = pos;
+        const len = line.len;
+        mutablePos += 1;
+        if (mutablePos < len) {
+            var char = line[mutablePos];
+            while (mutablePos < len and std.ascii.isDigit(char)) {
+                mutablePos += 1;
+                if (mutablePos >= len) {
+                    break;
+                }
+                char = line[mutablePos];
+            }
+        }
+        return mutablePos;
+    }
+
+    fn parseStr(self: *Self, pos: usize, line: []const u8) usize {
+        var mutablePos: usize = pos;
+        const quoteStyle = line[mutablePos];
+        const len = line.len;
+        mutablePos += 1;
+        if (mutablePos < len) {
+            while (true) {
+                var isEnd: bool = mutablePos >= len;
+                if (!isEnd) {
+                    var _peek: u8 = line[mutablePos];
+                    if (_peek == quoteStyle) {
+                        break;
+                    }
+                    mutablePos += 1;
+                } else {
+                    self.genUnterminatedStrErr(pos, line);
+                    return 0xFFFFFFFF;
+                }
+            }
+        } else {
+            self.genUnterminatedStrErr(pos, line);
+            return 0xFFFFFFFF;
+        }
+        return mutablePos;
+    }
+
+    fn genUnterminatedStrErr(self: *Self, pos: usize, line: []const u8) void {
+        const errTok = Token{ .token_type = TokenType.TOKEN_ERROR, .lexeme = "", .literal = "", .line = self.line, .column = pos + 1 };
+        var err = ScannerError{ .err_type = ScannerError.E.SYNTAX_ERROR, .err_subtype = ScannerError.E.UNTERMINATED_STR, .token = errTok, .src_line = line };
+        self.errors.append(err) catch |_err| {
+            std.debug.print("{?}", .{_err});
+        };
+        self.has_error = true;
+    }
+
+    fn _nonLiteralToken(self: *Self, tok_type: TokenType, lexeme: []const u8, column: usize) Token {
+        return Token{ .token_type = tok_type, .lexeme = lexeme, .literal = lexeme, .line = self.line, .column = column };
+    }
+
+    fn isAtEnd(self: *Self) bool {
+        return self.current >= self.source.len;
+    }
+};

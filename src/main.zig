@@ -269,6 +269,7 @@ pub const Interpreter = struct {
                             var current_scope: scope.Scope = self._internal_scope;
                             var new_scope: scope.Scope = current_scope.copy();
                             self._internal_scope = new_scope;
+                            // TODO: error: check parameter length and argument length
                             for (0..karya_decl.params.items.len) |idx| {
                                 var param_name: []const u8 = karya_decl.params.items[idx];
                                 var param_value: ast.LiteralValueType = self.evaluateExpr(karya.exprs.items[idx].*);
@@ -464,17 +465,19 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
 
-    scanner.init();
-    defer scanner.deinit();
     const source =
-        \\  karya LOG(msg) suru
-        \\      dekhau "LOG...";
-        \\      dekhau msg;
+        \\  karya strlen(str) suru
+        \\      rakha len ma 0;
+        \\      ghumau str patak |char| suru
+        \\          yadi char barabar "a" 
+        \\              chha rakha len ma len + 1;
+        \\      antya
+        \\      farkau len;
         \\  antya
         \\
-        \\  LOG("Memory Leak");
+        \\  dekhau strlen("rameshpoudel...");
     ;
-    var ss = scanner.Scanner(source){};
+    var ss: scanner.Scanner = scanner.Scanner.init(allocator.allocator(), source);
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
     if (!ss.has_error) {
         var p: parser.Parser = parser.Parser.init(allocator.allocator(), source, tokens);
@@ -486,7 +489,7 @@ pub fn main() !void {
         }
         p.deinit();
     }
-
+    ss.deinit();
     allocator.deinit();
     switch (gpa.deinit()) {
         .leak => {
