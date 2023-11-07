@@ -100,4 +100,6 @@ pub const Stmt = union(enum) {
     FarkauStmt: struct {
         expr: ?Expr,
     },
+
+    RokaStmt,
 };

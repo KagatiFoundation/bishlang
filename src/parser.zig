@@ -45,6 +45,7 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     exprs_allocated: std.ArrayList(*ast.Expr),
     stmts_allocated: std.ArrayList(*ast.Stmt),
+    parsing_loop: bool,
 
     const Self: type = @This();
 
@@ -59,6 +60,7 @@ pub const Parser = struct {
             .allocator = allocator,
             .exprs_allocated = std.ArrayList(*ast.Expr).init(allocator),
             .stmts_allocated = std.ArrayList(*ast.Stmt).init(allocator),
+            .parsing_loop = false,
         };
     }
 
@@ -113,6 +115,22 @@ pub const Parser = struct {
             .KW_FARKAU => {
                 self.skip(); // skip 'farkau'
                 return self.parseFarkauStmt();
+            },
+            .KW_ROKA => {
+                if (self.parsing_loop) {
+                    self.skip(); // skip 'roka'
+                    self.skip(); // skip ';'
+                    return .RokaStmt;
+                } else {
+                    self.has_error = true;
+                    errorutil.reportErrorFatal(
+                        self.peek(),
+                        "'roka' keyword 'ghumau' ya 'jabasamma' statement bhitra matra aauna sakchha",
+                        "yaha 'roka' lekhnu galat ho, yeslai hataunuhos",
+                    );
+                    self.hopToNextStmt();
+                    return null;
+                }
             },
             .TOKEN_EOF => {
                 self.current += 1;
@@ -290,6 +308,7 @@ pub const Parser = struct {
                     }
                 }
             }
+            self.parsing_loop = true;
             if (self.parseStmt()) |stmt| {
                 var ghumau_body_stmt: *ast.Stmt = self.allocator.create(ast.Stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
@@ -298,6 +317,7 @@ pub const Parser = struct {
                 self.stmts_allocated.append(ghumau_body_stmt) catch |app_err| {
                     std.debug.panic("Error: {any}\n", .{app_err});
                 };
+                self.parsing_loop = false;
                 return ast.Stmt{
                     .GhumauStmt = .{
                         .expr = expr,

@@ -75,6 +75,7 @@ pub const Interpreter = struct {
             .KaryaDeclStmt => |_| self.execKaryaDeclStmt(stmt),
             .ExprStmt => |_| self.execExprStmt(stmt), // expression statement values are ignored
             .FarkauStmt => |_| self.execFarkauStmt(stmt),
+            .RokaStmt => |_| self.execRokaStmt(stmt),
         };
     }
 
@@ -86,6 +87,14 @@ pub const Interpreter = struct {
             else => {},
         }
         return .Success;
+    }
+
+    fn execRokaStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
+        _ = self;
+        return switch (stmt) {
+            .RokaStmt => .Break,
+            else => .Success,
+        };
     }
 
     fn execFarkauStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
@@ -131,6 +140,7 @@ pub const Interpreter = struct {
                             var result: InterpretResult = self.execStmt(ghumau.stmt.*);
                             switch (result) {
                                 .Success => continue,
+                                .Break => break,
                                 else => return result,
                             }
                         }
@@ -148,6 +158,7 @@ pub const Interpreter = struct {
                             var result: InterpretResult = self.execStmt(ghumau.stmt.*);
                             switch (result) {
                                 .Success => continue,
+                                .Break => break,
                                 else => return result,
                             }
                         }
@@ -468,14 +479,23 @@ pub fn main() !void {
     const source =
         \\  karya strlen(str) suru
         \\      rakha len ma 0;
+        \\      rakha idx ma 0;
         \\      ghumau str patak |char| suru
-        \\          yadi char barabar "a" 
-        \\              chha rakha len ma len + 1;
+        \\          rakha idx ma idx + 1;
+        \\          yadi idx barabar 3 roka;
+        \\          natra rakha len ma len + 1;
         \\      antya
         \\      farkau len;
         \\  antya
         \\
-        \\  dekhau strlen("rameshpoudel...");
+        \\  karya fac(num) suru
+        \\      yadi num barabar 1 suru
+        \\          farkau 1;
+        \\      antya
+        \\      farkau num * fac(num - 1);
+        \\  antya
+        \\
+        \\  dekhau strlen("ramesh");
     ;
     var ss: scanner.Scanner = scanner.Scanner.init(allocator.allocator(), source);
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();

@@ -40,6 +40,7 @@ pub const TokenType = enum {
     KW_GARA, // keyword to call a function
     TOKEN_COMMA, // ,
     KW_FARKAU, // 'return' in other mainstream languages
+    KW_ROKA, // break
     KW_NIL, // 'null'
     TOKEN_PIPE,
     TOKEN_ERROR,
@@ -85,6 +86,7 @@ fn init_keywords() !bool {
     _ = try KEYWORDS.put("karya", TokenType.KW_KARYA);
     _ = try KEYWORDS.put("gara", TokenType.KW_GARA);
     _ = try KEYWORDS.put("farkau", TokenType.KW_FARKAU);
+    _ = try KEYWORDS.put("roka", TokenType.KW_ROKA);
     return true;
 }
 
