@@ -233,11 +233,7 @@ pub const Interpreter = struct {
 
     fn execDekhauStmt(self: *Self, stmt: ast.Stmt) InterpretResult {
         switch (stmt) {
-            .DekhauStmt => |dekhau| {
-                switch (dekhau.expr) {
-                    else => Interpreter.dumpLiteralValueType((self.evaluateExpr(dekhau.expr))),
-                }
-            },
+            .DekhauStmt => |dekhau| Interpreter.dumpLiteralValueType((self.evaluateExpr(dekhau.expr))),
             else => {},
         }
         return .Success;
@@ -255,7 +251,7 @@ pub const Interpreter = struct {
                     std.debug.print("{d:.6}\n", .{float_val});
                 }
             },
-            .Null => std.debug.print("nil", .{}),
+            .Null => std.debug.print("nil\n", .{}),
         }
     }
 
@@ -477,25 +473,8 @@ pub fn main() !void {
     var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
 
     const source =
-        \\  karya strlen(str) suru
-        \\      rakha len ma 0;
-        \\      rakha idx ma 0;
-        \\      ghumau str patak |char| suru
-        \\          rakha idx ma idx + 1;
-        \\          yadi idx barabar 3 roka;
-        \\          natra rakha len ma len + 1;
-        \\      antya
-        \\      farkau len;
-        \\  antya
-        \\
-        \\  karya fac(num) suru
-        \\      yadi num barabar 1 suru
-        \\          farkau 1;
-        \\      antya
-        \\      farkau num * fac(num - 1);
-        \\  antya
-        \\
-        \\  dekhau strlen("ramesh");
+        \\ rakha b ma 3;
+        \\ dekhau b();
     ;
     var ss: scanner.Scanner = scanner.Scanner.init(allocator.allocator(), source);
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();

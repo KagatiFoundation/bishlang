@@ -20,11 +20,13 @@ const scanner = @import("./scanner.zig");
 const ast = @import("./ast.zig");
 const errorutil = @import("./utils//errorutil.zig");
 const bu = @import("./utils/bishutil.zig");
+const stable = @import("./symtable.zig");
 
 // errors which may show up during parsing tokens
 const ParseError = error{
     ParenNotClosed,
     UnexpectedToken,
+    SymbolNotFound, // variable or function with given name is not found
 };
 
 // result will be one of Error(ErrorTokenType, ErrorToken) or Success(Expr) after parsing statements
@@ -45,8 +47,8 @@ pub const Parser = struct {
     allocator: std.mem.Allocator,
     exprs_allocated: std.ArrayList(*ast.Expr),
     stmts_allocated: std.ArrayList(*ast.Stmt),
-    parsing_loop: bool,
-
+    parsing_loop: bool, // set to "true" when parsing loops i.e. "ghumau" or "jabasamma"
+    sym_table: stable.Symtable, // symbol table which tracks variables
     const Self: type = @This();
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
@@ -61,6 +63,7 @@ pub const Parser = struct {
             .exprs_allocated = std.ArrayList(*ast.Expr).init(allocator),
             .stmts_allocated = std.ArrayList(*ast.Stmt).init(allocator),
             .parsing_loop = false,
+            .sym_table = stable.Symtable.init(allocator),
         };
     }
 
@@ -73,6 +76,7 @@ pub const Parser = struct {
         }
         self.exprs_allocated.deinit();
         self.stmts_allocated.deinit();
+        self.sym_table.deinit();
     }
 
     pub fn parse(self: *Self) !std.ArrayList(ast.Stmt) {
@@ -433,6 +437,7 @@ pub const Parser = struct {
                 return null;
             }
             self.current += 1; // skip ';' or 'EOF' token
+            _ = self.sym_table.add(var_name.lexeme);
             return ast.Stmt{
                 .RakhaStmt = .{
                     .var_name = var_name.lexeme,
@@ -496,6 +501,13 @@ pub const Parser = struct {
                             std.debug.panic("Error: {any}\n", .{_err});
                         };
                         errorutil.reportErrorFatal(err.err_token, msg, "yeslai hataunu hos");
+                        self.allocator.free(msg);
+                    },
+                    ParseError.SymbolNotFound => {
+                        var msg: []u8 = std.fmt.allocPrint(self.allocator, "'{s}' naam gareko symbol pahile banaiyeko chhaina", .{err.err_token.lexeme}) catch |_err| {
+                            std.debug.panic("Error: {any}\n", .{_err});
+                        };
+                        errorutil.reportErrorFatal(err.err_token, msg, null);
                         self.allocator.free(msg);
                     },
                 }
@@ -624,6 +636,14 @@ pub const Parser = struct {
                     self.skip(); // skip ')'
                     switch (prim_expr) {
                         .VariableExpr => |var_expr| {
+                            // if (self.sym_table.find(var_expr.var_name) == 0xFFFFFFFF) { // function name not found
+                            //     return ParseResult{
+                            //         .Error = .{
+                            //             .err_token = possible_call_expr_token,
+                            //             .err_type = ParseError.SymbolNotFound,
+                            //         },
+                            //     };
+                            // }
                             return ParseResult{ .Success = .{
                                 .CallExpr = .{
                                     .name = var_expr.var_name,
@@ -661,6 +681,15 @@ pub const Parser = struct {
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
             return ParseResult{ .Success = Parser.createLiteralExpr(.{ .String = now.literal }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
+            // check variable existence here
+            if (self.sym_table.find(now.lexeme) == 0xFFFFFFFF) {
+                return ParseResult{
+                    .Error = .{
+                        .err_token = now,
+                        .err_type = ParseError.SymbolNotFound,
+                    },
+                };
+            }
             return ParseResult{ .Success = .{ .VariableExpr = .{ .var_name = now.lexeme } } };
         } else if (now.token_type == scanner.TokenType.TOKEN_LEFT_PAREN) {
             var left_paren: scanner.Token = now;
