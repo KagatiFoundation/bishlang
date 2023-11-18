@@ -437,7 +437,7 @@ pub const Parser = struct {
                 return null;
             }
             self.current += 1; // skip ';' or 'EOF' token
-            _ = self.sym_table.add(var_name.lexeme);
+            _ = self.sym_table.add(stable.SymInfo{ .name = var_name.lexeme, .sym_type = .Variable });
             return ast.Stmt{
                 .RakhaStmt = .{
                     .var_name = var_name.lexeme,

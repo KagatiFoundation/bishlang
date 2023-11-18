@@ -20,14 +20,22 @@ const bu = @import("./utils/bishutil.zig");
 
 const NSYMBOLS: usize = 1024; // max number of symbols
 
+pub const SymInfo = struct {
+    name: []const u8,
+    sym_type: union(enum) {
+        Function,
+        Variable,
+    },
+};
+
 pub const Symtable = struct {
-    syms: std.ArrayList([]const u8),
+    syms: std.ArrayList(SymInfo),
     counter: usize,
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator) Self {
         return Self{
-            .syms = std.ArrayList([]const u8).init(allocator),
+            .syms = std.ArrayList(SymInfo).init(allocator),
             .counter = 0,
         };
     }
@@ -47,7 +55,7 @@ pub const Symtable = struct {
     pub fn find(self: *Self, name: []const u8) usize {
         var cc: usize = 0;
         for (self.syms.items) |symbol| {
-            if (bu.strcmp(symbol, name)) {
+            if (bu.strcmp(symbol.name, name)) {
                 return cc;
             }
             cc += 1;
@@ -55,11 +63,22 @@ pub const Symtable = struct {
         return 0xFFFFFFFF; // if symbol not found
     }
 
-    pub fn add(self: *Self, name: []const u8) usize {
-        var pos = self.find(name);
-        if (pos != 0xFFFFFFFF) return pos;
+    pub fn get(self: *Self, name: []const u8) ?SymInfo {
+        var cc: usize = 0;
+        for (self.syms.items) |symbol| {
+            if (bu.strcmp(symbol.name, name)) {
+                return self.syms.items[cc];
+            }
+            cc += 1;
+        }
+        return null;
+    }
+
+    pub fn add(self: *Self, sym: SymInfo) usize {
+        var pos = self.find(sym.name);
+        if (pos != 0xFFFFFFFF) return 0xFFFFFFFF; // symbol name already exists, can't add another with the same name
         pos = self.next();
-        self.syms.append(name) catch |err| {
+        self.syms.append(sym) catch |err| {
             std.debug.panic("Error appending into symbol table: {any}", .{err});
         };
         return pos;
