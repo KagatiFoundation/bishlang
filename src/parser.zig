@@ -27,6 +27,8 @@ const ParseError = error{
     ParenNotClosed,
     UnexpectedToken,
     SymbolNotFound, // variable or function with given name is not found
+    NotCallable, // returned when the symbol which is being called() is actually not callable
+    SymbolAlreadyDefined, // symbol is already defined
 };
 
 // result will be one of Error(ErrorTokenType, ErrorToken) or Success(Expr) after parsing statements
@@ -267,6 +269,15 @@ pub const Parser = struct {
                 self.stmts_allocated.append(karya_body_stmt) catch |app_err| {
                     std.debug.panic("Error: {any}\n", .{app_err});
                 };
+                var add_res = self.sym_table.add(stable.SymInfo{
+                    .name = name_token.lexeme,
+                    .sym_type = .Function,
+                    .token = name_token,
+                });
+                if (add_res == 0xFFFFFFFF) {
+                    std.debug.print("Function already exists: '{s}'", .{name_token.lexeme});
+                    std.os.exit(1);
+                }
                 return ast.Stmt{
                     .KaryaDeclStmt = .{
                         .name = name_token.lexeme,
@@ -437,7 +448,12 @@ pub const Parser = struct {
                 return null;
             }
             self.current += 1; // skip ';' or 'EOF' token
-            _ = self.sym_table.add(stable.SymInfo{ .name = var_name.lexeme, .sym_type = .Variable });
+            var add_res = self.sym_table.add(stable.SymInfo{ .name = var_name.lexeme, .sym_type = .Variable, .token = var_name });
+            if (add_res == 0xFFFFFFFF) {
+                std.debug.print("Symbol already defined: '{s}'", .{var_name.lexeme});
+                std.os.exit(0);
+                // return ParseResult{ .Error = .{ .err_token = var_name, .err_type = ParseError.SymbolAlreadyDefined } };
+            }
             return ast.Stmt{
                 .RakhaStmt = .{
                     .var_name = var_name.lexeme,
@@ -509,6 +525,21 @@ pub const Parser = struct {
                         };
                         errorutil.reportErrorFatal(err.err_token, msg, null);
                         self.allocator.free(msg);
+                    },
+                    ParseError.NotCallable => {
+                        var msg: []u8 = std.fmt.allocPrint(self.allocator, "'{s}' naam gareko karya pahile banaiyeko chhaina", .{err.err_token.lexeme}) catch |_err| {
+                            std.debug.panic("Error: {any}\n", .{_err});
+                        };
+                        errorutil.reportErrorFatal(err.err_token, msg, null);
+                        self.allocator.free(msg);
+                    },
+                    ParseError.SymbolAlreadyDefined => {
+                        if (self.sym_table.get(err.err_token.lexeme)) |prev_def| {
+                            if (prev_def.token) |token| {
+                                errorutil.reportErrorFatal(token, "pahile yaha banisakeko chha", null);
+                            }
+                        }
+                        errorutil.reportErrorFatal(err.err_token, "feri yaha pani tehi naam gareko symbol banauna prayas gariyeko chha", null);
                     },
                 }
                 return null;
@@ -636,14 +667,25 @@ pub const Parser = struct {
                     self.skip(); // skip ')'
                     switch (prim_expr) {
                         .VariableExpr => |var_expr| {
-                            // if (self.sym_table.find(var_expr.var_name) == 0xFFFFFFFF) { // function name not found
-                            //     return ParseResult{
-                            //         .Error = .{
-                            //             .err_token = possible_call_expr_token,
-                            //             .err_type = ParseError.SymbolNotFound,
-                            //         },
-                            //     };
-                            // }
+                            if (self.sym_table.get(var_expr.var_name)) |info| { // function name not found
+                                if (info.sym_type != .Function) {
+                                    self.hopToNextStmt();
+                                    return ParseResult{
+                                        .Error = .{
+                                            .err_token = possible_call_expr_token,
+                                            .err_type = ParseError.NotCallable,
+                                        },
+                                    };
+                                }
+                            } else {
+                                self.hopToNextStmt();
+                                return ParseResult{
+                                    .Error = .{
+                                        .err_token = possible_call_expr_token,
+                                        .err_type = ParseError.SymbolNotFound,
+                                    },
+                                };
+                            }
                             return ParseResult{ .Success = .{
                                 .CallExpr = .{
                                     .name = var_expr.var_name,

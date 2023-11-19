@@ -17,15 +17,18 @@
 
 const std = @import("std");
 const bu = @import("./utils/bishutil.zig");
+const scanner = @import("./scanner.zig");
 
 const NSYMBOLS: usize = 1024; // max number of symbols
 
+// TODO: add token field to track which token defined this sym info
 pub const SymInfo = struct {
     name: []const u8,
     sym_type: union(enum) {
         Function,
         Variable,
     },
+    token: ?scanner.Token,
 };
 
 pub const Symtable = struct {
@@ -53,6 +56,7 @@ pub const Symtable = struct {
     }
 
     pub fn find(self: *Self, name: []const u8) usize {
+        if (self.syms.items.len == 0) return 0xFFFFFFFF;
         var cc: usize = 0;
         for (self.syms.items) |symbol| {
             if (bu.strcmp(symbol.name, name)) {
@@ -64,23 +68,67 @@ pub const Symtable = struct {
     }
 
     pub fn get(self: *Self, name: []const u8) ?SymInfo {
-        var cc: usize = 0;
         for (self.syms.items) |symbol| {
             if (bu.strcmp(symbol.name, name)) {
-                return self.syms.items[cc];
+                return symbol;
             }
-            cc += 1;
         }
         return null;
     }
 
     pub fn add(self: *Self, sym: SymInfo) usize {
-        var pos = self.find(sym.name);
-        if (pos != 0xFFFFFFFF) return 0xFFFFFFFF; // symbol name already exists, can't add another with the same name
-        pos = self.next();
-        self.syms.append(sym) catch |err| {
-            std.debug.panic("Error appending into symbol table: {any}", .{err});
-        };
-        return pos;
+        if (self.find(sym.name) == 0xFFFFFFFF) {
+            self.syms.append(sym) catch |err| {
+                std.debug.panic("Error appending into symbol table: {any}", .{err});
+            };
+            var pos: usize = self.counter;
+            _ = self.next();
+            return pos;
+        }
+        // symbol name already exists, can't add another with the same name
+        return 0xFFFFFFFF;
     }
 };
+
+test "symtable add" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var a = gpa.allocator();
+    var alloc = std.heap.ArenaAllocator.init(a);
+    var st = Symtable.init(alloc.allocator());
+    try std.testing.expect(0 == st.add(SymInfo{ .name = "a", .sym_type = .Variable, .token = null }));
+    // this addition should result in 0xFFFFFFFF because the symbol with same name already exists
+    try std.testing.expect(0xFFFFFFFF == st.add(SymInfo{ .name = "a", .sym_type = .Variable, .token = null }));
+    try std.testing.expect(1 == st.add(SymInfo{ .name = "b", .sym_type = .Variable, .token = null }));
+    try std.testing.expect(2 == st.add(SymInfo{ .name = "c", .sym_type = .Variable, .token = null }));
+    try std.testing.expect(0xFFFFFFFF == st.add(SymInfo{ .name = "c", .sym_type = .Variable, .token = null }));
+    st.deinit();
+    alloc.deinit();
+    _ = gpa.deinit();
+}
+
+test "symtable find" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var a = gpa.allocator();
+    var alloc = std.heap.ArenaAllocator.init(a);
+    var st = Symtable.init(alloc.allocator());
+    try std.testing.expect(0 == st.add(SymInfo{ .name = "a", .sym_type = .Variable, .token = null }));
+    try std.testing.expect(0xFFFFFFFF == st.find("b"));
+    try std.testing.expect(0 == st.find("a"));
+    try std.testing.expect(0xFFFFFFFF == st.find("abc"));
+    try std.testing.expect(0xFFFFFFFF == st.find(""));
+    st.deinit();
+    alloc.deinit();
+    _ = gpa.deinit();
+}
+
+test "symtable get" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var a = gpa.allocator();
+    var alloc = std.heap.ArenaAllocator.init(a);
+    var st = Symtable.init(alloc.allocator());
+    try std.testing.expect(0 == st.add(SymInfo{ .name = "a", .sym_type = .Variable, .token = null }));
+    try std.testing.expect(.Variable == st.get("a").?.sym_type);
+    try std.testing.expect(1 == st.add(SymInfo{ .name = "b", .sym_type = .Function, .token = null }));
+    try std.testing.expect(bu.strcmp(st.get("b").?.name, "b"));
+    try std.testing.expect(null == st.get("ddd"));
+}

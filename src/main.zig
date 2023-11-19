@@ -21,6 +21,7 @@ const parser = @import("./parser.zig");
 const ast = @import("./ast.zig");
 const bu = @import("./utils/bishutil.zig");
 const scope = @import("./scope.zig");
+const sym_table = @import("./symtable.zig");
 
 const InterpretResult = union(enum) {
     Success,
@@ -33,13 +34,15 @@ pub const Interpreter = struct {
     stmts: std.ArrayList(ast.Stmt),
     _internal_scope: scope.Scope,
     allocator: std.mem.Allocator,
+    sym_table: sym_table.Symtable,
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, stmts: std.ArrayList(ast.Stmt)) Self {
+    pub fn init(allocator: std.mem.Allocator, stmts: std.ArrayList(ast.Stmt), syms: sym_table.Symtable) Self {
         return Interpreter{
             .stmts = stmts,
             ._internal_scope = scope.Scope.init(allocator),
             .allocator = allocator,
+            .sym_table = syms,
         };
     }
 
@@ -473,6 +476,7 @@ pub fn main() !void {
     var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
 
     const source =
+        \\ karya b() suru farkau 3; antya
         \\ rakha b ma 3;
         \\ dekhau b();
     ;
@@ -482,7 +486,7 @@ pub fn main() !void {
         var p: parser.Parser = parser.Parser.init(allocator.allocator(), source, tokens);
         var stmts: std.ArrayList(ast.Stmt) = try p.parse();
         if (!p.has_error) {
-            var int: Interpreter = Interpreter.init(allocator.allocator(), stmts);
+            var int: Interpreter = Interpreter.init(allocator.allocator(), stmts, p.sym_table);
             int.interpret();
             int.deinit();
         }

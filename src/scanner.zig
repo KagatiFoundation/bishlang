@@ -16,7 +16,7 @@
 //
 
 const std = @import("std");
-var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+var arena: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 
 pub const TokenType = enum {
     TOKEN_DEKHAU, // dekhau = "print"
@@ -123,6 +123,12 @@ const ScannerError = struct {
         std.debug.print("    ^\n", .{});
     }
 };
+
+// Use this struct for token position tracking
+// pub const TokenPos = struct {
+//     line: usize,
+//     column: usize,
+// };
 
 pub const Token = struct {
     token_type: TokenType,
