@@ -21,7 +21,14 @@ const scanner = @import("./scanner.zig");
 
 const NSYMBOLS: usize = 1024; // max number of symbols
 
-// TODO: add token field to track which token defined this sym info
+// to represent different types of symbols
+pub const SymType = union(enum) {
+    Function,
+    String,
+    Integer,
+    Boolean,
+};
+
 pub const SymInfo = struct {
     name: []const u8,
     sym_type: union(enum) {
