@@ -64,13 +64,10 @@ pub const Symtable = struct {
     }
 
     pub fn find(self: *Self, name: []const u8) usize {
-        if (self.syms.items.len == 0) return 0xFFFFFFFF;
-        var cc: usize = 0;
-        for (self.syms.items) |symbol| {
-            if (bu.strcmp(symbol.name, name)) {
-                return cc;
+        if (self.syms.items.len != 0) {
+            for (self.syms.items, 0..) |symbol, idx| {
+                if (bu.strcmp(symbol.name, name)) return idx;
             }
-            cc += 1;
         }
         return 0xFFFFFFFF; // if symbol not found
     }
@@ -104,6 +101,28 @@ pub const Symtable = struct {
                 std.debug.panic("Error appending symbol table: {any}", .{err});
             };
         }
+    }
+
+    pub fn check(self: *Self, name: []const u8, s: SymScope) usize {
+        for (self.syms.items, 0..) |item, idx| {
+            if (bu.strcmp(item.name, name) and item.scope == s) return idx;
+        }
+        return 0xFFFFFFFF;
+    }
+
+    pub fn isFuncParam(self: *Self, name: []const u8, fname: []const u8) usize {
+        var idx: usize = self.check(name, .FuncParam);
+        if (idx != 0xFFFFFFFF) {
+            if (self.get(name)) |symbol| {
+                switch (symbol.scope) {
+                    .FuncParam => |_fname| {
+                        if (bu.strcmp(_fname, fname)) return idx;
+                    },
+                    else => {},
+                }
+            }
+        }
+        return 0xFFFFFFFF;
     }
 };
 

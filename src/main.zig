@@ -475,10 +475,14 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator: std.heap.ArenaAllocator = std.heap.ArenaAllocator.init(gpa.allocator());
 
+    // Issues
+    // 1) suru(not closed) suru(closed) antya -> check brace balance
+
     const source =
-        \\ karya b() suru farkau 3; antya
-        \\ rakha b ma 3;
-        \\ dekhau b();
+        \\ karya double(x) suru farkau x * 2; antya
+        \\
+        \\ dekhau double(5);
+        \\ dekhau x;
     ;
     var ss: scanner.Scanner = scanner.Scanner.init(allocator.allocator(), source);
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();
