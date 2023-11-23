@@ -21,6 +21,7 @@ const ast = @import("./ast.zig");
 const errorutil = @import("./utils//errorutil.zig");
 const bu = @import("./utils/bishutil.zig");
 const stable = @import("./symtable.zig");
+const scope = @import("./scope.zig");
 
 // errors which may show up during parsing tokens
 const ParseError = error{
@@ -40,6 +41,13 @@ const ParseResult = union(enum) {
     },
 };
 
+const ParserState = union(enum) {
+    ParsingInGlobalScope,
+    ParsingLoop,
+    ParsingBlock,
+    ParsingFunction,
+};
+
 pub const Parser = struct {
     source_lines: std.mem.SplitIterator(u8, .sequence),
     tokens: std.ArrayList(scanner.Token),
@@ -51,6 +59,7 @@ pub const Parser = struct {
     stmts_allocated: std.ArrayList(*ast.Stmt),
     parsing_loop: bool, // set to "true" when parsing loops i.e. "ghumau" or "jabasamma"
     sym_table: stable.Symtable, // symbol table which tracks variables
+    state: ParserState,
     const Self: type = @This();
 
     pub fn init(allocator: std.mem.Allocator, source: []const u8, tokens: std.ArrayList(scanner.Token)) Parser {
@@ -66,6 +75,7 @@ pub const Parser = struct {
             .stmts_allocated = std.ArrayList(*ast.Stmt).init(allocator),
             .parsing_loop = false,
             .sym_table = stable.Symtable.init(allocator),
+            .state = .ParsingInGlobalScope,
         };
     }
 
@@ -125,6 +135,7 @@ pub const Parser = struct {
             .KW_ROKA => {
                 if (self.parsing_loop) {
                     self.skip(); // skip 'roka'
+                    // test to see if the next token is semicolon
                     self.skip(); // skip ';'
                     return .RokaStmt;
                 } else {
@@ -164,7 +175,6 @@ pub const Parser = struct {
                 break;
             }
         }
-
         if (ok) {
             if (self.parseExpr()) |expr| {
                 if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
@@ -208,11 +218,19 @@ pub const Parser = struct {
 
     fn parseKaryaDeclStmt(self: *Self) ?ast.Stmt {
         var name_token: scanner.Token = self.peek();
+        if (self.state != .ParsingInGlobalScope) {
+            errorutil.reportErrorFatal(name_token, "euta karya bhitra arko karya banauna mananiya chhaina", null);
+            self.skipBlock();
+            return null;
+        }
+        var tmp_stable: stable.Symtable = stable.Symtable.init(self.allocator);
+        self.state = .ParsingFunction;
         if (name_token.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
             self.skip(); // skip karya name
             if (!self.expectToken(scanner.TokenType.TOKEN_LEFT_PAREN, "(")) {
                 self.has_error = true;
-                self.hopToNextStmt();
+                self.skipBlock();
+                self.state = .ParsingInGlobalScope;
                 return null;
             }
             self.skip(); // skip '('
@@ -227,18 +245,27 @@ pub const Parser = struct {
                         // If this situation arises, we just break out of it.
                         if (now.token_type == scanner.TokenType.TOKEN_RIGHT_PAREN) break;
                         errorutil.reportErrorFatal(now, "yaha parameter ko naam sachyaunus", "yo parameter ko naam galat ho");
-                        self.hopToNextStmt();
+                        self.skipBlock();
+                        self.state = .ParsingInGlobalScope;
                         return null;
                     }
                     var new_var_name: []const u8 = now.lexeme;
                     if (bu.stringArrListContains(new_var_name, param_names)) {
                         errorutil.reportErrorFatal(now, "ustai naam ko parameter feri vetiyo", "Yo naam ko parameter pahile banisakeko chha");
-                        self.hopToNextStmt();
+                        self.skipBlock();
+                        self.state = .ParsingInGlobalScope;
                         return null;
                     }
                     param_names.append(now.lexeme) catch |app_err| {
                         std.debug.panic("Error adding parameter name to the ArrayList: {any}\n", .{app_err});
                     }; // add 'parameter' name to function parameter list
+                    // parameter of a function is considered a symbol
+                    _ = tmp_stable.add(stable.SymInfo{
+                        .name = now.lexeme,
+                        .sym_type = .Variable,
+                        .token = now,
+                        .scope = stable.SymScope{ .FuncParam = .{ .func_name = name_token.lexeme } },
+                    });
                     self.skip(); // skip parameter name
                     now = self.peek();
                     if (now.token_type == scanner.TokenType.TOKEN_RIGHT_PAREN) {
@@ -249,7 +276,8 @@ pub const Parser = struct {
                         continue;
                     } else {
                         errorutil.reportErrorFatal(now, "TODO ERROR MESSAGE!!!", "yaha ',' ya ')' aaunu parne hunchha");
-                        self.hopToNextStmt();
+                        self.skipBlock();
+                        self.state = .ParsingInGlobalScope;
                         return null;
                     }
                 }
@@ -257,10 +285,16 @@ pub const Parser = struct {
 
             if (!self.expectToken(scanner.TokenType.TOKEN_RIGHT_PAREN, ")")) {
                 self.has_error = true;
-                self.hopToNextStmt();
+                self.skipBlock();
+                self.state = .ParsingInGlobalScope;
                 return null;
             }
             self.skip(); // skip ')'
+            if (!self.expectToken(scanner.TokenType.KW_SURU, "suru")) {
+                self.skipBlock();
+                self.state = .ParsingInGlobalScope;
+                return null;
+            }
             if (self.parseStmt()) |stmt| {
                 var karya_body_stmt: *ast.Stmt = self.allocator.create(ast.Stmt) catch |err| {
                     std.debug.panic("Error: {any}\n", .{err});
@@ -269,10 +303,13 @@ pub const Parser = struct {
                 self.stmts_allocated.append(karya_body_stmt) catch |app_err| {
                     std.debug.panic("Error: {any}\n", .{app_err});
                 };
+                // append
+                self.sym_table.append(tmp_stable);
                 var add_res = self.sym_table.add(stable.SymInfo{
                     .name = name_token.lexeme,
                     .sym_type = .Function,
                     .token = name_token,
+                    .scope = .Global,
                 });
                 if (add_res == 0xFFFFFFFF) {
                     std.debug.print("Function already exists: '{s}'", .{name_token.lexeme});
@@ -285,9 +322,13 @@ pub const Parser = struct {
                         .params = param_names,
                     },
                 };
-            } else return null;
+            } else {
+                self.state = .ParsingInGlobalScope;
+                return null;
+            }
         }
-        self.hopToNextStmt();
+        self.skipBlock();
+        self.state = .ParsingInGlobalScope;
         return null;
     }
 
@@ -389,6 +430,13 @@ pub const Parser = struct {
 
     fn parseBlockStmt(self: *Self) ?ast.Stmt {
         var block_start_token: scanner.Token = self.tokens.items[self.current - 1]; // 'suru' token
+        if (!self.checkBraceBalance()) {
+            self.has_error = true;
+            self.current = self.tokens_len;
+            errorutil.reportErrorFatal(block_start_token, "'suru' garisakepachhi 'antya' pani garnus", null);
+            return null;
+        }
+
         var stmts: std.ArrayList(*ast.Stmt) = std.ArrayList(*ast.Stmt).init(self.allocator);
         while (true) {
             var now: scanner.Token = self.peek();
@@ -412,13 +460,12 @@ pub const Parser = struct {
                 break;
             }
         }
-
-        if (self.peek().token_type != scanner.TokenType.KW_ANTYA) {
-            self.has_error = true;
-            stmts.deinit();
-            errorutil.reportErrorFatal(block_start_token, "'suru' garisakepachhi 'antya' pani garnus", null);
-            return null;
-        }
+        // if (self.peek().token_type != scanner.TokenType.KW_ANTYA) {
+        //     self.has_error = true;
+        //     stmts.deinit();
+        //     errorutil.reportErrorFatal(block_start_token, "'suru' garisakepachhi 'antya' pani garnus", null);
+        //     return null;
+        // }
         self.current += 1; // skip 'antya'
         return ast.Stmt{ .BlockStmt = .{ .stmts = stmts } };
     }
@@ -431,7 +478,7 @@ pub const Parser = struct {
             errorutil.reportErrorFatal(var_name, "'rakha' pacchi variable ko naam dinus", "yaha variable ko naam huna parchha");
             return null;
         }
-        self.current += 1; // skip past identifier name
+        self.skip(); // skip past identifier name
 
         var now: scanner.Token = self.peek(); // 'ma' keyword
         if (now.token_type != scanner.TokenType.TOKEN_MA) {
@@ -440,15 +487,20 @@ pub const Parser = struct {
             errorutil.reportErrorFatal(now, "variable ko naam pachhi 'ma' lekhnus", "variable ma value store garna 'ma' keyword lekhnu parne hunchha");
             return null;
         }
-        self.current += 1; // skip past 'ma' keyword
+        self.skip(); // skip past 'ma' keyword
 
         if (self.parseExpr()) |expr| {
             if (!self.expectToken(scanner.TokenType.TOKEN_SEMICOLON, ";")) {
                 self.hopToNextStmt();
                 return null;
             }
-            self.current += 1; // skip ';' or 'EOF' token
-            var add_res = self.sym_table.add(stable.SymInfo{ .name = var_name.lexeme, .sym_type = .Variable, .token = var_name });
+            self.skip(); // skip ';' or 'EOF' token
+            var add_res = self.sym_table.add(stable.SymInfo{
+                .name = var_name.lexeme,
+                .sym_type = .Variable,
+                .token = var_name,
+                .scope = .Global,
+            });
             if (add_res == 0xFFFFFFFF) {
                 std.debug.print("Symbol already defined: '{s}'", .{var_name.lexeme});
                 std.os.exit(0);
@@ -804,19 +856,37 @@ pub const Parser = struct {
 
     // skip to the token after next ';'
     fn hopToNextStmt(self: *Self) void {
+        self.hopToNextToken(scanner.TokenType.TOKEN_SEMICOLON);
+    }
+
+    // skip to the token after next 'antya'
+    fn skipBlock(self: *Self) void {
+        return self.hopToNextToken(scanner.TokenType.KW_ANTYA);
+    }
+
+    fn hopToNextToken(self: *Self, tt: scanner.TokenType) void {
         while (true) {
             var now: scanner.Token = self.peek();
-            if (now.token_type != scanner.TokenType.TOKEN_NONE) {
-                var found: bool = now.token_type == scanner.TokenType.TOKEN_SEMICOLON or now.token_type == scanner.TokenType.KW_ANTYA;
-                if (found) {
-                    self.current += 1; // skip the ';'
-                    break;
-                }
-                self.current += 1;
-            } else {
+            if (now.token_type == scanner.TokenType.TOKEN_EOF or now.token_type == tt) {
+                self.skip();
                 break;
-            }
+            } else self.skip();
         }
+    }
+
+    fn checkBraceBalance(self: *Self) bool {
+        var tmpc: usize = self.current;
+        while (true) {
+            if (tmpc >= self.tokens_len) break;
+            var token: scanner.Token = self.tokens.items[tmpc];
+            if (token.token_type == scanner.TokenType.KW_ANTYA) {
+                return true;
+            } else if (token.token_type == scanner.TokenType.KW_SURU) {
+                return self.checkBraceBalance();
+            }
+            tmpc += 1;
+        }
+        return false;
     }
 
     // creates an unexpected token error instance at the current token

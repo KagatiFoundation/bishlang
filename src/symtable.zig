@@ -22,20 +22,21 @@ const scanner = @import("./scanner.zig");
 const NSYMBOLS: usize = 1024; // max number of symbols
 
 // to represent different types of symbols
-pub const SymType = union(enum) {
-    Function,
-    String,
-    Integer,
-    Boolean,
+pub const SymType = union(enum) { Function, Variable };
+
+pub const SymScope = union(enum) {
+    FuncParam: struct {
+        func_name: []const u8,
+    },
+    Global,
+    BlockLocal,
 };
 
 pub const SymInfo = struct {
     name: []const u8,
-    sym_type: union(enum) {
-        Function,
-        Variable,
-    },
+    sym_type: SymType,
     token: ?scanner.Token,
+    scope: SymScope,
 };
 
 pub const Symtable = struct {
@@ -94,6 +95,15 @@ pub const Symtable = struct {
         }
         // symbol name already exists, can't add another with the same name
         return 0xFFFFFFFF;
+    }
+
+    pub fn append(self: *Self, stable: Symtable) void {
+        if (stable.syms.items.len == 0) return;
+        for (stable.syms.items) |item| {
+            self.syms.append(item) catch |err| {
+                std.debug.panic("Error appending symbol table: {any}", .{err});
+            };
+        }
     }
 };
 
