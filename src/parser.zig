@@ -352,6 +352,12 @@ pub const Parser = struct {
                         return null;
                     }
                     self.skip(); // skip ending '|'
+                    _ = self.sym_table.add(stable.SymInfo{
+                        .name = now.lexeme,
+                        .sym_type = .Variable,
+                        .token = now,
+                        .scope = .LoopLocal,
+                    });
                     switch (ghumau_var_expr) {
                         .VariableExpr => |var_expr| {
                             var_expr_id = var_expr.var_name;
@@ -770,19 +776,10 @@ pub const Parser = struct {
         } else if (now.token_type == scanner.TokenType.TOKEN_STRING) {
             return ParseResult{ .Success = Parser.createLiteralExpr(.{ .String = now.literal }) };
         } else if (now.token_type == scanner.TokenType.TOKEN_IDENTIFIER) {
-            // check variable existence here
-            if (self.sym_table.find(now.lexeme) == 0xFFFFFFFF) {
-                return ParseResult{
-                    .Error = .{
-                        .err_token = now,
-                        .err_type = ParseError.SymbolNotFound,
-                    },
-                };
-            }
             return ParseResult{ .Success = .{ .VariableExpr = .{ .var_name = now.lexeme } } };
         } else if (now.token_type == scanner.TokenType.TOKEN_LEFT_PAREN) {
             var left_paren: scanner.Token = now;
-            // self.skip(); // skip '('
+            self.skip(); // skip '('
             var group_expr_res = self.parseLogicalOr();
             switch (group_expr_res) {
                 .Success => |group_expr| {

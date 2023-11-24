@@ -479,10 +479,8 @@ pub fn main() !void {
     // 1) suru(not closed) suru(closed) antya -> check brace balance
 
     const source =
-        \\ karya double(x) suru farkau x * 2; antya
-        \\
-        \\ dekhau double(5);
-        \\ dekhau x;
+        \\ karya iseven(x) suru farkau (x % 2) barabar 0; antya
+        \\ dekhau iseven(4);
     ;
     var ss: scanner.Scanner = scanner.Scanner.init(allocator.allocator(), source);
     var tokens: std.ArrayList(scanner.Token) = try ss.scanTokens();

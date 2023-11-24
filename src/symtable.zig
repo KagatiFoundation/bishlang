@@ -30,6 +30,7 @@ pub const SymScope = union(enum) {
     },
     Global,
     BlockLocal,
+    LoopLocal,
 };
 
 pub const SymInfo = struct {
