@@ -1,4 +1,4 @@
-# Nepali programming language
+# Nepali interpreted programming language
 
 ## 1) String length counting using only loop
 ```code
